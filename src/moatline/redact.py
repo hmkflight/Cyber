@@ -1,0 +1,147 @@
+"""Secret masking.
+
+Every string that comes from a config file passes through these functions
+before it reaches a report. The goal is that a report can be pasted into a
+chat or a ticket without leaking a credential.
+
+Rules:
+- Environment variable values and header values are never shown. Callers
+  report only their names (see ``names_only``).
+- ``${VAR}`` references are kept, because they are not secrets.
+- Known token formats, long random-looking strings, and values of flags such
+  as ``--api-key=...`` are replaced with ``[REDACTED]``.
+- URLs lose their username, password, query string and fragment.
+"""
+
+from __future__ import annotations
+
+import re
+from typing import Any, Iterable
+from urllib.parse import urlsplit, urlunsplit
+
+REDACTED = "[REDACTED]"
+
+_VAR_REF = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*(?::-[^}]*)?\}")
+
+_KNOWN_TOKENS = [
+    re.compile(r"sk-[A-Za-z0-9_\-]{16,}"),  # OpenAI / Anthropic style keys
+    re.compile(r"gh[pousr]_[A-Za-z0-9]{20,}"),  # GitHub tokens
+    re.compile(r"github_pat_[A-Za-z0-9_]{20,}"),
+    re.compile(r"xox[abposr]-[A-Za-z0-9\-]{10,}"),  # Slack tokens
+    re.compile(r"AKIA[0-9A-Z]{16}"),  # AWS access key IDs
+    re.compile(r"AIza[0-9A-Za-z_\-]{30,}"),  # Google API keys
+    re.compile(r"eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}"),  # JWTs
+    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+]
+
+_SECRET_WORD = r"(?:api[_-]?key|access[_-]?key|secret|token|password|passwd|pwd|auth)(?:[_-][a-z]+)?"
+# Command-line flags: --token abc, --api-key=abc, -password abc
+_SECRET_FLAG = re.compile(rf"(?i)((?<![\w-])--?{_SECRET_WORD})(\s*=\s*|\s+)([^\s\"']+)")
+# Assignments: token=abc, PASSWORD: abc, api_key="abc"
+_SECRET_ASSIGN = re.compile(rf"(?i)(\b[A-Za-z0-9_]*{_SECRET_WORD})(\s*[=:]\s*[\"']?)([^\s\"']+)")
+# A list item that is only a secret flag, so the next item is its value.
+_SECRET_FLAG_ALONE = re.compile(rf"(?i)^--?{_SECRET_WORD}$")
+_BEARER = re.compile(r"(?i)\b(bearer|basic)\s+([A-Za-z0-9._~+/\-]+=*)")
+
+# Long strings of letters and digits that look random (hex or base64).
+_LONG_RANDOM = re.compile(r"\b[A-Za-z0-9+/_\-]{32,}={0,2}")
+
+
+def _looks_random(candidate: str) -> bool:
+    """Random tokens mix letters and digits and rarely contain word separators.
+
+    Long readable names such as "mcp-server-postgres-2024-edition" are kept.
+    """
+    has_digit = any(c.isdigit() for c in candidate)
+    has_alpha = any(c.isalpha() for c in candidate)
+    separators = sum(1 for c in candidate if c in "-_")
+    return has_digit and has_alpha and "/" not in candidate.strip("/") and separators <= 3
+
+
+def redact_text(value: str) -> str:
+    """Return ``value`` with anything secret-looking replaced."""
+    if not value:
+        return value
+
+    # Protect ${VAR} references so they survive the passes below.
+    placeholders: list[str] = []
+
+    def _stash(match: re.Match[str]) -> str:
+        placeholders.append(match.group(0))
+        return f"\x00{len(placeholders) - 1}\x00"
+
+    text = _VAR_REF.sub(_stash, value)
+
+    for pattern in _KNOWN_TOKENS:
+        text = pattern.sub(REDACTED, text)
+
+    text = _BEARER.sub(lambda m: f"{m.group(1)} {REDACTED}", text)
+
+    def _flag(match: re.Match[str]) -> str:
+        flag_value = match.group(3)
+        if flag_value.startswith("\x00") or flag_value == REDACTED:
+            return match.group(0)
+        return f"{match.group(1)}{match.group(2)}{REDACTED}"
+
+    text = _SECRET_FLAG.sub(_flag, text)
+    text = _SECRET_ASSIGN.sub(_flag, text)
+
+    text = _LONG_RANDOM.sub(
+        lambda m: REDACTED if _looks_random(m.group(0)) else m.group(0), text
+    )
+
+    for index, original in enumerate(placeholders):
+        text = text.replace(f"\x00{index}\x00", original)
+    return text
+
+
+def redact_url(value: str) -> str:
+    """Keep scheme, host, port and path. Drop credentials, query and fragment."""
+    if not value:
+        return value
+    if _VAR_REF.fullmatch(value):
+        return value
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        return redact_text(value)
+    if not parts.scheme or not parts.netloc:
+        return redact_text(value)
+    host = parts.hostname or ""
+    if parts.port:
+        host = f"{host}:{parts.port}"
+    query = "[query removed]" if parts.query else ""
+    cleaned = urlunsplit((parts.scheme, host, parts.path, "", ""))
+    cleaned = redact_text(cleaned)
+    return f"{cleaned}?{query}" if query else cleaned
+
+
+def redact_list(values: Iterable[Any]) -> list[str]:
+    """Redact a list of command arguments.
+
+    Handles flags split across two items, such as ["--api-key", "abc"].
+    """
+    cleaned: list[str] = []
+    hide_next = False
+    for raw in values:
+        value = str(raw)
+        if hide_next and not _VAR_REF.fullmatch(value):
+            cleaned.append(REDACTED)
+        else:
+            cleaned.append(redact_text(value))
+        hide_next = bool(_SECRET_FLAG_ALONE.match(value))
+    return cleaned
+
+
+def names_only(mapping: Any) -> list[str]:
+    """Return the sorted keys of a dict, never its values."""
+    if not isinstance(mapping, dict):
+        return []
+    return sorted(str(k) for k in mapping.keys())
+
+
+def last_four(secret: str) -> str:
+    """Show only the last 4 characters of a secret, for findings that need it."""
+    if len(secret) <= 4:
+        return "****"
+    return "****" + secret[-4:]

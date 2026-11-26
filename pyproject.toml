@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "moatline"
+version = "0.0.1"
+description = "Free, read-only inventory scan of AI-agent configurations: MCP servers, hooks, plugins and skills."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+authors = [{ name = "Hudson" }]
+dependencies = []
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Operating System :: OS Independent",
+  "Topic :: Security",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+moatline = "moatline.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/moatline"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

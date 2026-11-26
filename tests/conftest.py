@@ -90,7 +90,13 @@ def fake_env(tmp_path: Path) -> ScanContext:
                             "headers": {"Authorization": f"Bearer {FAKE_SECRETS[2]}"},
                         }
                     }
-                }
+                },
+                # A project inside the home folder: its path must print as ~/code/site.
+                str(home / "code" / "site"): {
+                    "mcpServers": {
+                        "playwright": {"command": "npx", "args": ["@playwright/mcp@latest"]}
+                    }
+                },
             },
         },
     )

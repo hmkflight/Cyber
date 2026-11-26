@@ -74,6 +74,12 @@ def test_no_secret_value_appears_in_any_report(fake_env, render):
         assert name in output
 
 
+def test_text_report_hides_the_username(fake_env):
+    output = to_text(run_all(fake_env), fake_env)
+    assert str(fake_env.home) not in output
+    assert "project: ~" in output
+
+
 def test_reports_hide_the_username(fake_env):
     output = to_json(run_all(fake_env), fake_env)
     payload = json.loads(output)

@@ -131,7 +131,12 @@ def to_text(result: ScanResult, ctx: ScanContext) -> str:
             lines.append("")
             lines.append(KIND_TITLES[kind])
             for asset in items:
-                desc = _clean(_describe(asset), ctx.home)
+                # Shorten home paths inside each detail before joining them into one line.
+                cleaned = Asset(
+                    asset.kind, asset.platform, asset.scope, asset.name, asset.source,
+                    _clean(asset.details, ctx.home),
+                )
+                desc = _describe(cleaned)
                 lines.append(f"  - {asset.name} ({asset.scope})" + (f": {desc}" if desc else ""))
                 lines.append(f"      from {_shorten(asset.source, ctx.home)}")
 

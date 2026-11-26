@@ -14,7 +14,7 @@ def _by(result, kind):
 def test_finds_every_mcp_server_with_the_right_scope(fake_env):
     result = claude_code.scan(fake_env)
     servers = _by(result, "mcp_server")
-    assert set(servers) == {"github", "stripe", "db", "company-docs"}
+    assert set(servers) == {"github", "stripe", "db", "company-docs", "playwright"}
     assert servers["github"].scope == "user"
     assert servers["stripe"].scope == "local"
     assert servers["db"].scope == "project"

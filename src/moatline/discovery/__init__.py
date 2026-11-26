@@ -6,12 +6,17 @@ To add a tool, write a module with a ``PLATFORM`` name and a
 
 from __future__ import annotations
 
-from moatline.discovery import claude_code
+from moatline.discovery import claude_code, codex, copilot, cursor, gemini_cli, vscode
 from moatline.discovery.base import ScanContext
 from moatline.models import ScanError, ScanResult
 
 DISCOVERERS = {
     claude_code.PLATFORM: claude_code.scan,
+    copilot.PLATFORM: copilot.scan,
+    vscode.PLATFORM: vscode.scan,
+    codex.PLATFORM: codex.scan,
+    gemini_cli.PLATFORM: gemini_cli.scan,
+    cursor.PLATFORM: cursor.scan,
 }
 
 

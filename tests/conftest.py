@@ -19,6 +19,18 @@ FAKE_SECRETS = [
     "shortpw42",
     "FAKEKEY1234567890abcdefFAKEKEY99",
     "hunter2-FAKE",
+    # Week 3: other AI tools
+    "ctx7-FAKE-secret-value-0001",
+    "secretFAKE77",
+    "corpFAKEkey",
+    "vscodeFAKEsecret123",
+    "codexFAKEenvvalue1",
+    "figmaFAKEheader22",
+    "geminiFAKEkey333",
+    "geminiFAKEurl444",
+    "geminiFAKEbearer555",
+    "geminiExtFAKE666",
+    "cursorFAKEbearer777",
 ]
 
 
@@ -133,4 +145,142 @@ def fake_env(tmp_path: Path) -> ScanContext:
     _write_json(system / "managed-settings.json", {"allowManagedHooksOnly": True, "permissions": {"deny": ["Bash(sudo *)"]}})
     _write_json(system / "managed-mcp.json", {"mcpServers": {"company-docs": {"type": "http", "url": "https://docs.internal.example/mcp"}}})
 
-    return ScanContext(home=home, project=project, env={}, system_dirs={"claude_code": system})
+    system_dirs = _add_other_tools(home, project, tmp_path / "system")
+    system_dirs["claude_code"] = system
+    return ScanContext(home=home, project=project, platform_os="darwin", env={}, system_dirs=system_dirs)
+
+
+def _write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _add_other_tools(home: Path, project: Path, system_root: Path) -> dict[str, Path]:
+    """Fake configs for Copilot, VS Code, Codex, Gemini CLI and Cursor."""
+    # GitHub Copilot
+    _write_json(
+        home / ".copilot" / "mcp-config.json",
+        {
+            "mcpServers": {
+                "playwright": {"type": "local", "command": "npx", "args": ["@playwright/mcp@latest"], "tools": ["*"]},
+                "context7": {
+                    "type": "http",
+                    "url": "https://mcp.context7.com/mcp",
+                    "headers": {"CONTEXT7_API_KEY": "ctx7-FAKE-secret-value-0001"},
+                    "tools": ["*"],
+                },
+            }
+        },
+    )
+    _write_json(
+        home / ".copilot" / "hooks" / "audit.json",
+        {"version": 1, "hooks": {"preToolUse": [{"type": "command", "bash": "./audit.sh --token secretFAKE77", "timeoutSec": 10}]}},
+    )
+    _write_json(
+        project / ".github" / "hooks" / "policy.json",
+        {"hooks": {"PreToolUse": [{"matcher": "shell", "hooks": [{"type": "command", "command": "python3 .github/hooks/check.py"}]}]}},
+    )
+    _write_json(project / ".github" / "copilot" / "settings.json", {"disableAllHooks": False})
+    copilot_policy = system_root / "copilot-policy.d"
+    _write_json(
+        copilot_policy / "00-company.json",
+        {"version": 1, "hooks": {"preToolUse": [{"type": "http", "url": "https://policy.corp.example/check", "headers": {"X-Key": "corpFAKEkey"}}]}},
+    )
+
+    # VS Code (macOS user profile path, JSON with comments and a trailing comma)
+    _write_text(
+        home / "Library" / "Application Support" / "Code" / "User" / "mcp.json",
+        """{
+  // Prompted values are never stored in this file
+  "inputs": [{"id": "github-pat", "type": "promptString", "password": true}],
+  "servers": {
+    "github": {"type": "http", "url": "https://api.githubcopilot.com/mcp/",
+               "headers": {"Authorization": "Bearer ${input:github-pat}"}},
+    /* a local server */
+    "fs": {"type": "stdio", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "~/docs"],
+           "env": {"SECRET_THING": "vscodeFAKEsecret123"}},
+  },
+}
+""",
+    )
+    _write_json(project / ".vscode" / "mcp.json", {"servers": {"local-db": {"command": "node", "args": ["db.js"]}}})
+
+    # OpenAI Codex
+    _write_text(
+        home / ".codex" / "config.toml",
+        """approval_policy = "never"
+sandbox_mode = "danger-full-access"
+
+[mcp_servers.context7]
+command = "npx"
+args = ["-y", "@upstash/context7-mcp"]
+env_vars = ["LOCAL_TOKEN"]
+
+[mcp_servers.context7.env]
+MY_ENV_VAR = "codexFAKEenvvalue1"
+
+[mcp_servers.figma]
+url = "https://mcp.figma.com/mcp"
+bearer_token_env_var = "FIGMA_OAUTH_TOKEN"
+http_headers = { "X-Figma-Region" = "us-east-1", "X-Api-Key" = "figmaFAKEheader22" }
+enabled_tools = ["open", "screenshot"]
+
+[[hooks.PreToolUse]]
+matcher = "^Bash$"
+
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "python3 ~/.codex/hooks/policy.py"
+""",
+    )
+    _write_json(
+        project / ".codex" / "hooks.json",
+        {"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "python3 init.py"}]}]}},
+    )
+
+    # Gemini CLI
+    _write_text(
+        home / ".gemini" / "settings.json",
+        """{
+  // user settings
+  "general": {"defaultApprovalMode": "auto_edit"},
+  "security": {"folderTrust": {"enabled": false}},
+  "tools": {"allowed": ["run_shell_command(git)"]},
+  "mcpServers": {
+    "weather": {"command": "node", "args": ["w.js"], "env": {"WEATHER_KEY": "geminiFAKEkey333"},
+                "trust": true, "excludeTools": ["delete"]},
+    "remote": {"httpUrl": "https://mcp.example.com/mcp?token=geminiFAKEurl444",
+               "headers": {"Authorization": "Bearer geminiFAKEbearer555"}}
+  },
+  "hooks": {"BeforeTool": [{"matcher": "write_file|replace", "hooks": [
+    {"name": "secret-scanner", "type": "command", "command": "$GEMINI_PROJECT_DIR/.gemini/hooks/block-secrets.sh"}]}]}
+}
+""",
+    )
+    gemini_system = system_root / "GeminiCli"
+    _write_json(gemini_system / "settings.json", {"security": {"disableYoloMode": True}})
+    ext = home / ".gemini" / "extensions" / "gcp"
+    _write_json(
+        ext / "gemini-extension.json",
+        {"name": "gcp", "version": "1.0.0", "mcpServers": {"gcp-tools": {"command": "node", "args": ["${extensionPath}/server.js"]}}},
+    )
+    _write_json(ext / "hooks" / "hooks.json", {"hooks": {"AfterTool": [{"hooks": [{"type": "command", "command": "./log.sh"}]}]}})
+    _write_text(ext / ".env", "API_KEY=geminiExtFAKE666\n")
+
+    # Cursor
+    _write_json(
+        home / ".cursor" / "mcp.json",
+        {"mcpServers": {"linear": {"url": "https://mcp.linear.app/sse", "headers": {"Authorization": "Bearer cursorFAKEbearer777"}}}},
+    )
+    _write_json(
+        project / ".cursor" / "mcp.json",
+        {"mcpServers": {"local": {"command": "python", "args": ["${workspaceFolder}/tools/server.py"], "env": {"API_KEY": "${env:API_KEY}"}}}},
+    )
+    _write_json(
+        home / ".cursor" / "hooks.json",
+        {"version": 1, "hooks": {"beforeShellExecution": [{"command": "./guard.sh"}], "beforeMCPExecution": [{"command": "./mcp-log.sh"}]}},
+    )
+    cursor_enterprise = system_root / "Cursor"
+    _write_json(cursor_enterprise / "hooks.json", {"version": 1, "hooks": {"beforeShellExecution": [{"command": "/opt/corp/guard"}]}})
+
+    return {"copilot_policy": copilot_policy, "gemini_system": gemini_system, "cursor_enterprise": cursor_enterprise}

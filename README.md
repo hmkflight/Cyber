@@ -2,12 +2,16 @@
 
 Moatline finds every AI-agent configuration on a machine and lists what each agent can reach: MCP servers, hooks, plugins, skills, subagents, custom commands and settings. It is the free first step of the Moatline catalog.
 
-## What it covers today (v0.0.1)
+## What it covers today (v0.0.2)
 
-| AI tool | Status |
+| AI tool | What the scan reads |
 |---|---|
 | Claude Code | Settings (managed, user, project, local), MCP servers (user, local, project, managed), hooks, plugins, marketplaces, skills, subagents, commands |
-| GitHub Copilot, OpenAI Codex, Gemini CLI, Cursor | Planned (week 3) |
+| GitHub Copilot | `~/.copilot/mcp-config.json`, Copilot hooks (user, repo `.github/hooks`, admin policy hooks), `.github/copilot` settings |
+| VS Code | User-profile and workspace `mcp.json` (Stable and Insiders) |
+| OpenAI Codex | `~/.codex/config.toml` and project `.codex/config.toml` (MCP servers, approval and sandbox settings, hooks), `hooks.json` |
+| Gemini CLI | System, user and project `settings.json` (MCP servers, approval and trust settings, hooks), extensions |
+| Cursor | User and project `mcp.json`, user, project and enterprise `hooks.json` |
 
 Risk checks and plain-language findings come in week 4.
 

@@ -22,11 +22,20 @@ KIND_TITLES = {
     "skill": "Skills",
     "subagent": "Subagents",
     "command": "Custom commands",
+    "extension": "Extensions",
     "settings_file": "Settings files",
 }
 KIND_ORDER = list(KIND_TITLES)
 
-PLATFORM_TITLES = {"claude_code": "Claude Code"}
+PLATFORM_TITLES = {
+    "claude_code": "Claude Code",
+    "copilot": "GitHub Copilot",
+    "vscode": "VS Code",
+    "codex": "OpenAI Codex",
+    "gemini_cli": "Gemini CLI",
+    "cursor": "Cursor",
+}
+PLATFORM_ORDER = list(PLATFORM_TITLES)
 
 
 def _shorten(path: str, home: Path) -> str:
@@ -75,8 +84,25 @@ def _describe(asset: Asset) -> str:
             bits.append("env: " + ", ".join(d["env_names"]))
         if d.get("header_names"):
             bits.append("headers: " + ", ".join(d["header_names"]))
+        if d.get("token_env_var"):
+            bits.append("token from env: " + d["token_env_var"])
+        if d.get("input_names"):
+            bits.append("prompts for: " + ", ".join(d["input_names"]))
+        for flag in ("trust", "enabled", "disabled"):
+            if flag in d:
+                bits.append(f"{flag}: {_yes_no(d[flag])}")
+        for key in ("tools", "includeTools", "enabled_tools", "allowedTools"):
+            if isinstance(d.get(key), list):
+                bits.append("tools allowed: " + (", ".join(d[key]) or "none"))
+        for key in ("excludeTools", "disabled_tools"):
+            if isinstance(d.get(key), list) and d[key]:
+                bits.append("tools blocked: " + ", ".join(d[key]))
+        if d.get("extension"):
+            bits.append("from extension: " + d["extension"])
         if d.get("project_path"):
             bits.append("project: " + d["project_path"])
+        if d.get("also_used_by"):
+            bits.append("also used by: " + d["also_used_by"])
         return "; ".join(bits)
     if asset.kind == "hook":
         action = d.get("command") or d.get("url") or d.get("prompt_preview") or ""
@@ -88,20 +114,71 @@ def _describe(asset: Asset) -> str:
     if asset.kind == "marketplace":
         return d.get("source", "")
     if asset.kind == "settings_file":
-        bits = []
-        if d.get("default_permission_mode"):
-            bits.append(f"default mode: {d['default_permission_mode']}")
-        bits.append(f"sandbox: {'on' if d.get('sandbox_enabled') else 'off or not set'}")
-        bits.append(f"allow rules: {len(d.get('allow_rules', []))}")
+        return _describe_settings(d)
+    if asset.kind == "extension":
+        bits = [f"version {d['version']}"] if d.get("version") else []
+        bits.append(f"MCP servers: {d.get('mcp_server_count', 0)}")
         bits.append(f"hooks: {d.get('hook_count', 0)}")
-        if d.get("env_names"):
-            bits.append("env: " + ", ".join(d["env_names"]))
-        if d.get("enabled_plugins"):
-            bits.append("plugins on: " + ", ".join(d["enabled_plugins"]))
+        if d.get("has_env_file"):
+            bits.append("has its own .env file")
         return "; ".join(bits)
     if asset.kind == "skill":
         return f"{d.get('bundled_files', 0)} bundled file(s)"
     return ""
+
+
+_SETTING_LABELS = {
+    "default_permission_mode": "default mode",
+    "approval_policy": "approval policy",
+    "sandbox_mode": "sandbox mode",
+    "sandbox_network_access": "sandbox network access",
+    "default_approval_mode": "default approval mode",
+    "sandbox_enabled": "sandbox",
+    "sandbox": "sandbox",
+    "folder_trust": "folder trust",
+    "disable_yolo_mode": "YOLO mode blocked",
+    "secure_mode": "secure mode",
+    "auto_accept": "auto-accept",
+    "env_var_redaction": "env var redaction",
+    "hook_count": "hooks",
+    "mcp_server_count": "MCP servers",
+    "auto_allowed_tools": "tools that skip approval",
+    "mcp_allowed": "MCP allowlist entries",
+    "mcp_excluded": "MCP blocklist entries",
+}
+
+
+def _yes_no(value: Any) -> str:
+    if value is True:
+        return "on"
+    if value is False:
+        return "off"
+    return str(value)
+
+
+def _describe_settings(d: dict[str, Any]) -> str:
+    bits: list[str] = []
+    for key, value in d.items():
+        if value is None or value == [] or value == "":
+            continue
+        if key == "allow_rules":
+            bits.append(f"allow rules: {len(value)}")
+        elif key == "ask_rule_count" or key == "deny_rule_count":
+            continue
+        elif key == "env_names":
+            bits.append("env: " + ", ".join(value))
+        elif key == "enabled_plugins":
+            bits.append("plugins on: " + ", ".join(value))
+        elif key == "profiles":
+            bits.append("profiles: " + ", ".join(value))
+        elif isinstance(value, (list, dict)):
+            continue
+        else:
+            bits.append(f"{_SETTING_LABELS.get(key, key)}: {_yes_no(value)}")
+    if "sandbox_enabled" not in d or d.get("sandbox_enabled") is None:
+        if "default_permission_mode" in d:  # Claude Code settings file without a sandbox setting
+            bits.append("sandbox: not set")
+    return "; ".join(bits)
 
 
 def to_text(result: ScanResult, ctx: ScanContext) -> str:
@@ -116,11 +193,14 @@ def to_text(result: ScanResult, ctx: ScanContext) -> str:
         lines.append("No AI-agent configuration found.")
     else:
         lines.append("Summary")
+        tools = [PLATFORM_TITLES.get(p, p) for p in PLATFORM_ORDER if any(a.platform == p for a in result.assets)]
+        lines.append(f"  AI tools found: {', '.join(tools)}")
         for kind in KIND_ORDER:
             if kind in counts:
                 lines.append(f"  {KIND_TITLES[kind]}: {counts[kind]}")
 
-    platforms = sorted({a.platform for a in result.assets})
+    found = {a.platform for a in result.assets}
+    platforms = [p for p in PLATFORM_ORDER if p in found] + sorted(found - set(PLATFORM_ORDER))
     for platform in platforms:
         lines.append("")
         lines.append(f"== {PLATFORM_TITLES.get(platform, platform)} ==")

@@ -36,10 +36,10 @@ Don't paste long reports, logs or full test output. Put details in files if they
 - `src/moatline/cli.py`: command-line entry point (`moatline scan`)
 - `src/moatline/models.py`: data types for discovered assets and errors
 - `src/moatline/redact.py`: secret masking. Every string from a config file passes through it before output
-- `src/moatline/discovery/`: one module per AI tool (`claude_code.py` first; Copilot, Codex, Gemini CLI and Cursor next)
+- `src/moatline/discovery/`: one module per AI tool (`claude_code.py`, `copilot.py`, `vscode.py`, `codex.py`, `gemini_cli.py`, `cursor.py`). Shared parsers for MCP servers and hooks live in `common.py`; file readers (JSON, JSON with comments, TOML) live in `base.py`
 - `src/moatline/report.py`: text and JSON output
 - `tests/`: pytest tests with fake home and project folders
 
 ## Where the plans live
 
-The company plans (service list, cross-platform plan, 90-day plan) are in Hudson's "Cyber security" Claude project. This repo follows the 90-day plan: weeks 1–2 build the scanner skeleton and Claude Code discovery.
+The company plans (service list, cross-platform plan, 90-day plan) are in Hudson's "Cyber security" Claude project. This repo follows the 90-day plan: weeks 1–2 built the scanner and Claude Code discovery; week 3 added Copilot, VS Code, Codex, Gemini CLI and Cursor; week 4 adds risk checks.

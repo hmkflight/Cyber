@@ -18,7 +18,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from moatline.discovery.base import ScanContext, list_children, read_json
+from moatline.discovery.base import ScanContext, list_children, read_json, system_dir
+from moatline.discovery.common import scan_hooks_block, scan_mcp_block
 from moatline.models import Asset, ScanError, ScanResult
 from moatline.redact import names_only, redact_list, redact_text, redact_url
 
@@ -32,10 +33,7 @@ _SYSTEM_DIRS = {
 
 
 def _system_dir(ctx: ScanContext) -> Path | None:
-    if ctx.system_dirs is not None:
-        return ctx.system_dirs.get(PLATFORM)
-    key = "linux" if ctx.platform_os.startswith("linux") else ctx.platform_os
-    return _SYSTEM_DIRS.get(key)
+    return system_dir(ctx, PLATFORM, _SYSTEM_DIRS)
 
 
 def _config_dir(ctx: ScanContext) -> Path:
@@ -72,13 +70,14 @@ def scan(ctx: ScanContext) -> ScanResult:
     for global_file in _unique([ctx.home / ".claude.json", config_dir / ".claude.json"]):
         data = read_json(global_file, PLATFORM, result)
         if isinstance(data, dict):
-            _scan_mcp_block(data.get("mcpServers"), "user", global_file, result)
+            scan_mcp_block(data.get("mcpServers"), PLATFORM, "user", global_file, result)
             projects = data.get("projects")
             if isinstance(projects, dict):
                 for project_path, project_state in projects.items():
                     if isinstance(project_state, dict):
-                        _scan_mcp_block(
+                        scan_mcp_block(
                             project_state.get("mcpServers"),
+                            PLATFORM,
                             "local",
                             global_file,
                             result,
@@ -88,13 +87,16 @@ def scan(ctx: ScanContext) -> ScanResult:
     project_mcp = ctx.project / ".mcp.json"
     data = read_json(project_mcp, PLATFORM, result)
     if isinstance(data, dict):
-        _scan_mcp_block(data.get("mcpServers"), "project", project_mcp, result)
+        scan_mcp_block(
+            data.get("mcpServers"), PLATFORM, "project", project_mcp, result,
+            extra={"also_used_by": "GitHub Copilot"},
+        )
 
     if system_dir is not None:
         managed_mcp = system_dir / "managed-mcp.json"
         data = read_json(managed_mcp, PLATFORM, result)
         if isinstance(data, dict):
-            _scan_mcp_block(data.get("mcpServers"), "managed", managed_mcp, result)
+            scan_mcp_block(data.get("mcpServers"), PLATFORM, "managed", managed_mcp, result)
 
     # Skills, subagents and commands.
     for scope, base in (("user", config_dir), ("project", ctx.project / ".claude")):
@@ -125,7 +127,7 @@ def _scan_settings(data: dict[str, Any], scope: str, path: Path, result: ScanRes
     marketplaces = data.get("extraKnownMarketplaces") if isinstance(data.get("extraKnownMarketplaces"), dict) else {}
 
     hooks_block = data.get("hooks") if isinstance(data.get("hooks"), dict) else {}
-    hook_count = _scan_hooks(hooks_block, scope, path, result)
+    hook_count = scan_hooks_block(hooks_block, PLATFORM, scope, path, result)
 
     details: dict[str, Any] = {
         "default_permission_mode": permissions.get("defaultMode"),
@@ -161,69 +163,6 @@ def _describe_source(source: Any) -> str:
     if isinstance(source, str):
         return redact_url(source)
     return "unknown"
-
-
-def _scan_hooks(hooks_block: dict[str, Any], scope: str, path: Path, result: ScanResult) -> int:
-    count = 0
-    for event, groups in hooks_block.items():
-        if not isinstance(groups, list):
-            continue
-        for group in groups:
-            if not isinstance(group, dict):
-                continue
-            matcher = group.get("matcher", "")
-            handlers = group.get("hooks") if isinstance(group.get("hooks"), list) else []
-            for handler in handlers:
-                if not isinstance(handler, dict):
-                    continue
-                count += 1
-                hook_type = handler.get("type", "command")
-                details: dict[str, Any] = {
-                    "event": str(event),
-                    "matcher": redact_text(str(matcher)),
-                    "type": str(hook_type),
-                }
-                if "command" in handler:
-                    details["command"] = redact_text(str(handler["command"]))
-                if "url" in handler:
-                    details["url"] = redact_url(str(handler["url"]))
-                    details["header_names"] = names_only(handler.get("headers"))
-                if "prompt" in handler:
-                    details["prompt_preview"] = redact_text(str(handler["prompt"])[:120])
-                for key in ("timeout", "onFailure"):
-                    if key in handler:
-                        details[key] = handler[key]
-                label = f"{event}" + (f" [{details['matcher']}]" if matcher else "")
-                result.assets.append(Asset("hook", PLATFORM, scope, label, str(path), details))
-    return count
-
-
-def _scan_mcp_block(
-    block: Any,
-    scope: str,
-    path: Path,
-    result: ScanResult,
-    extra: dict[str, Any] | None = None,
-) -> None:
-    if not isinstance(block, dict):
-        return
-    for name, server in block.items():
-        if not isinstance(server, dict):
-            result.errors.append(ScanError(PLATFORM, str(path), f"MCP server '{name}' is not an object"))
-            continue
-        transport = server.get("type") or ("stdio" if "command" in server else "unknown")
-        details: dict[str, Any] = {"transport": str(transport)}
-        if "command" in server:
-            details["command"] = redact_text(str(server["command"]))
-            args = server.get("args")
-            details["args"] = redact_list(args) if isinstance(args, list) else []
-        if "url" in server:
-            details["url"] = redact_url(str(server["url"]))
-        details["env_names"] = names_only(server.get("env"))
-        details["header_names"] = names_only(server.get("headers"))
-        if extra:
-            details.update(extra)
-        result.assets.append(Asset("mcp_server", PLATFORM, scope, str(name), str(path), details))
 
 
 def _scan_skills(folder: Path, scope: str, result: ScanResult) -> None:

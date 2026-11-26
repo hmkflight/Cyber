@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "moatline"
-version = "0.0.1"
+version = "0.0.2"
 description = "Free, read-only inventory scan of AI-agent configurations: MCP servers, hooks, plugins and skills."
 readme = "README.md"
 requires-python = ">=3.11"

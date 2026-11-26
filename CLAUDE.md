@@ -2,7 +2,16 @@
 
 Moatline is a security company for AI-agent ecosystems. This repo starts with the free **Agent Inventory Scan**: a command-line tool that finds every agent configuration, MCP server, hook, plugin and skill on a machine and reports the risks in plain language.
 
-"Moatline" is a working name. It may change.
+## How to report back to Hudson
+
+Hudson reviews every piece of work. When you finish a task, reply in this shape and nothing more:
+
+1. **What changed**: two or three plain-English sentences. No jargon without a short explanation.
+2. **What you need to do**: numbered, exact steps, with every command written out in full, ready to copy and paste.
+3. **What you should see**: the expected result for each step, so he can tell whether it worked.
+4. **Decisions needed**: only if there are any, one line each.
+
+Don't paste long reports, logs or full test output. Put details in files if they're needed, and point to them in one line.
 
 ## Hard rules (never break these)
 

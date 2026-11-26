@@ -2,7 +2,7 @@
 
 One line per decision, newest at the bottom. Format: date: decision (why).
 
-- 2026-11-25: Working name "Moatline" (free on PyPI; easy to rename later).
+- 2026-11-25: Name is "Moatline" (confirmed by Hudson; free on PyPI).
 - 2026-11-25: Python 3.11+, standard library only at runtime (easy install, small attack surface, `tomllib` built in for Codex's TOML configs).
 - 2026-11-25: The scanner is read-only and makes no network calls (clients can run it without trusting us with anything).
 - 2026-11-25: Secrets are never printed; env and header values are dropped, token-like strings are redacted (a security tool must not leak what it finds).

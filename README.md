@@ -2,8 +2,6 @@
 
 Moatline finds every AI-agent configuration on a machine and lists what each agent can reach: MCP servers, hooks, plugins, skills, subagents, custom commands and settings. It is the free first step of the Moatline catalog.
 
-"Moatline" is a working name.
-
 ## What it covers today (v0.0.1)
 
 | AI tool | Status |

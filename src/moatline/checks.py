@@ -15,7 +15,7 @@ from typing import Callable, Iterable
 
 from moatline.discovery.base import ScanContext
 from moatline.models import SEVERITY_ORDER, Asset, Finding, ScanError, ScanResult
-from moatline.redact import REDACTED
+from moatline.redact import REDACTED, looks_secret_name
 
 OWASP = {
     "ASI02": "ASI02 Tool Misuse and Exploitation",
@@ -405,6 +405,36 @@ def check_third_party_extensions(result: ScanResult, ctx: ScanContext) -> list[F
     return findings
 
 
+# ML010 One key shared by several AI tools ---------------------------------------
+
+
+def _credential_names(asset: Asset) -> set[str]:
+    d = asset.details
+    names = {str(n) for n in [*d.get("env_names", []), *d.get("header_names", [])] if looks_secret_name(n)}
+    if d.get("token_env_var"):
+        names.add(str(d["token_env_var"]))
+    return names
+
+
+def check_shared_credentials(result: ScanResult, ctx: ScanContext) -> list[Finding]:
+    users: dict[str, list[Asset]] = {}
+    for asset in _of_kind(result, "mcp_server"):
+        for name in _credential_names(asset):
+            users.setdefault(name, []).append(asset)
+    findings = []
+    for name, assets in sorted(users.items()):
+        tools = sorted({_tool(a) for a in assets})
+        if len(tools) < 2 or name.lower() == "authorization":
+            continue  # "Authorization" is a header name, not one specific key
+        findings.append(_finding(
+            "ML010", "low", f"{name} is shared by {len(tools)} AI tools", assets[0],
+            "If any one of these agents is tricked into leaking or misusing the key, all of them are exposed, and you can't tell which one did it.",
+            "Give each AI tool its own key with only the access it needs, so you can revoke one without breaking the others.",
+            "ASI03", "used by " + ", ".join(f"{_tool(a)} '{a.name}'" for a in assets),
+        ))
+    return findings
+
+
 CHECKS: list[Callable[[ScanResult, ScanContext], list[Finding]]] = [
     check_acts_without_asking,
     check_sandbox,
@@ -414,6 +444,7 @@ CHECKS: list[Callable[[ScanResult, ScanContext], list[Finding]]] = [
     check_project_hooks,
     check_plain_http,
     check_third_party_extensions,
+    check_shared_credentials,
 ]
 
 

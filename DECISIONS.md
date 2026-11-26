@@ -14,8 +14,9 @@ One line per decision, newest at the bottom. Format: date: decision (why).
 - 2026-11-25: The project-root .mcp.json is listed once, under Claude Code, marked "also used by GitHub Copilot", to avoid double counting.
 - 2026-11-25: Not covered yet: skills and agents for non-Claude tools, Codex admin-managed config, Cursor's Windows enterprise path, Add when their file locations are confirmed.
 - 2026-11-25: Antigravity is not supported (Hudson's decision). Don't add it unless he asks.
-- 2026-11-25: Week 4 risk checks live in `checks.py` and only read assets discovery already redacted, so a check can never reveal a secret. Each finding has an ID (ML001-ML009), severity, plain "why" and "fix", and an OWASP Agentic (ASI) mapping.
+- 2026-11-25: Week 4 risk checks live in `checks.py` and only read assets discovery already redacted, so a check can never reveal a secret. Each finding has an ID (ML001-ML010), severity, plain "why" and "fix", and an OWASP Agentic (ASI) mapping.
 - 2026-11-25: A secret counts as "typed into a file" when the value is not a `${VAR}`-style reference and its name or shape looks secret. Switches, small numbers, paths and plain URLs are ignored to keep false alarms down.
 - 2026-11-25: Only Anthropic's reserved marketplace names count as official plugins. Community marketplaces are flagged (low), because their plugins are written by third parties.
 - 2026-11-25: An MCP package is "pinned" only with an exact version (npm `x.y.z`, Python `==` or `@version`, Docker tag or digest). Ranges like `^1.2` still update on their own.
 - 2026-11-25: The home folder is replaced with `~` anywhere it appears in a report, including inside hook commands.
+- 2026-11-25: "Shared credentials" (ML010) compares key names only, never values: the same secret-looking variable or header name used by MCP servers in two or more AI tools.

@@ -154,6 +154,11 @@ _SECRET_NAME = re.compile(
 _REFERENCE = re.compile(r"\$\{|^\$[A-Za-z_]|\{env:|\{input:")
 
 
+def looks_secret_name(name: Any) -> bool:
+    """True for names like GITHUB_TOKEN, X-Api-Key or Authorization."""
+    return bool(_SECRET_NAME.search(str(name)))
+
+
 def literal_secret_names(mapping: Any) -> list[str]:
     """Names of entries whose value is a secret typed straight into the file.
 

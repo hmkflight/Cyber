@@ -309,6 +309,33 @@ def test_third_party_plugin_flagged_official_not(empty_env):
     assert finding.severity == "low"
 
 
+# ML010 shared credentials --------------------------------------------------------
+
+
+def test_same_key_in_two_tools_is_flagged(empty_env):
+    _safe_claude_settings(empty_env)
+    _write(empty_env.home / ".claude.json", {"mcpServers": {"github": {"command": "node", "args": ["gh.js"], "env": {"GITHUB_TOKEN": "${GITHUB_TOKEN}"}}}})
+    _write(
+        empty_env.home / ".codex" / "config.toml",
+        '[mcp_servers.gh]\ncommand = "node"\nargs = ["gh.js"]\nenv_vars = ["GITHUB_TOKEN"]\n',
+    )
+    [finding] = _findings(empty_env, "ML010")
+    assert finding.title == "GITHUB_TOKEN is shared by 2 AI tools"
+    assert "Claude Code 'github'" in finding.evidence and "OpenAI Codex 'gh'" in finding.evidence
+
+
+def test_key_used_by_one_tool_only_is_fine(empty_env):
+    _safe_claude_settings(empty_env)
+    _write(
+        empty_env.home / ".claude.json",
+        {"mcpServers": {
+            "a": {"command": "node", "args": ["a.js"], "env": {"GITHUB_TOKEN": "${GITHUB_TOKEN}"}},
+            "b": {"command": "node", "args": ["b.js"], "env": {"GITHUB_TOKEN": "${GITHUB_TOKEN}", "REGION": "us"}},
+        }},
+    )
+    assert _findings(empty_env, "ML010") == []
+
+
 # Report, CLI and safety ---------------------------------------------------------
 
 

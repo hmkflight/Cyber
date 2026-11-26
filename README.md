@@ -30,6 +30,7 @@ After the inventory, the report lists risky settings, most serious first. Each f
 | ML007 | Hook defined inside a project folder (runs whatever the project author wrote) | Medium | ASI05 Code execution |
 | ML008 | Remote server or hook over plain `http://` | Medium | ASI07 Agent communication |
 | ML009 | Plugin or extension from a third-party marketplace | Low | ASI04 Supply chain |
+| ML010 | The same key (for example `GITHUB_TOKEN`) given to MCP servers in two or more AI tools | Low | ASI03 Identity and privilege |
 
 Findings show names, never secret values.
 

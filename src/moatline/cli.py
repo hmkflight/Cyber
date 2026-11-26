@@ -7,8 +7,10 @@ import sys
 from pathlib import Path
 
 from moatline import __version__
+from moatline.checks import run_checks
 from moatline.discovery import DISCOVERERS, run_all
 from moatline.discovery.base import ScanContext
+from moatline.models import SEVERITY_ORDER
 from moatline.report import to_json, to_text
 
 
@@ -29,6 +31,12 @@ def build_parser() -> argparse.ArgumentParser:
         choices=sorted(DISCOVERERS),
         help="only scan this AI tool (repeatable; default: all)",
     )
+    scan.add_argument(
+        "--fail-on",
+        choices=list(SEVERITY_ORDER),
+        default=None,
+        help="exit with code 1 if any finding is this severe or worse (for CI)",
+    )
     scan.add_argument("--home", type=Path, default=None, help=argparse.SUPPRESS)  # for tests and demos
     return parser
 
@@ -47,8 +55,13 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     result = run_all(ctx, platforms=args.platform)
-    output = to_json(result, ctx) if args.format == "json" else to_text(result, ctx)
+    findings = run_checks(result, ctx)
+    output = to_json(result, ctx, findings) if args.format == "json" else to_text(result, ctx, findings)
     print(output)
+    if args.fail_on is not None:
+        limit = SEVERITY_ORDER[args.fail_on]
+        if any(SEVERITY_ORDER.get(f.severity, 9) <= limit for f in findings):
+            return 1
     return 0
 
 

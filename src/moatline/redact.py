@@ -108,8 +108,14 @@ def redact_url(value: str) -> str:
     if not parts.scheme or not parts.netloc:
         return redact_text(value)
     host = parts.hostname or ""
-    if parts.port:
-        host = f"{host}:{parts.port}"
+    if ":" in host:  # IPv6 addresses keep their brackets
+        host = f"[{host}]"
+    try:
+        port = parts.port
+    except ValueError:  # a port like ":abc" is malformed; show the text redacted instead
+        return redact_text(value.split("?", 1)[0])
+    if port:
+        host = f"{host}:{port}"
     query = "[query removed]" if parts.query else ""
     cleaned = urlunsplit((parts.scheme, host, parts.path, "", ""))
     cleaned = redact_text(cleaned)
@@ -138,6 +144,76 @@ def names_only(mapping: Any) -> list[str]:
     if not isinstance(mapping, dict):
         return []
     return sorted(str(k) for k in mapping.keys())
+
+
+# Whole name parts only, so GIT_AUTHOR_NAME or MONKEY_MODE don't count.
+_SECRET_NAME = re.compile(
+    r"(?i)(?:^|[_\-.\s])(?:api[_-]?key|key|keys|token|secret|secrets|passw(?:or)?d|pwd|auth|authorization"
+    r"|credentials?|cookie|bearer|pat)(?:$|[_\-.\s])"
+)
+_REFERENCE = re.compile(r"\$\{|^\$[A-Za-z_]|\{env:|\{input:")
+
+
+_CAMEL = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+
+
+def looks_secret_name(name: Any) -> bool:
+    """True for names like GITHUB_TOKEN, X-Api-Key, Authorization or accessToken."""
+    return bool(_SECRET_NAME.search(_CAMEL.sub("_", str(name))))
+
+
+def literal_secret_names(mapping: Any) -> list[str]:
+    """Names of entries whose value is a secret typed straight into the file.
+
+    A value counts when it is not a reference such as ${VAR}, $VAR or
+    ${input:id}, and either its name sounds secret (KEY, TOKEN, Authorization...)
+    or the value itself looks like a token. Only names are returned, never values.
+    """
+    if not isinstance(mapping, dict):
+        return []
+    found = []
+    for name, value in mapping.items():
+        if not isinstance(value, str) or not value.strip():
+            continue
+        if _REFERENCE.search(value) or _plain_setting(value):
+            continue
+        if looks_secret_name(name) or redact_text(value) != value:
+            found.append(str(name))
+    return sorted(found)
+
+
+_PLAIN_WORDS = {"true", "false", "yes", "no", "on", "off", "none", "null", "oauth", "basic", "bearer"}
+
+
+def _plain_setting(value: str) -> bool:
+    """Values that are settings, not secrets: switches, small numbers, paths, plain URLs."""
+    text = value.strip()
+    if text.lower() in _PLAIN_WORDS or (text.isdigit() and len(text) < 8):
+        return True
+    if text.startswith(("/", "~/", "./", "../")) and redact_text(text) == text:
+        return True
+    if text.lower().startswith(("http://", "https://")):
+        return not url_has_secret(text)
+    return False
+
+
+def url_has_secret(value: Any) -> bool:
+    """True when a URL carries a password or a token-looking value in its query."""
+    if not isinstance(value, str) or _VAR_REF.fullmatch(value):
+        return False
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        return redact_text(value) != value
+    if parts.password:
+        return True
+    for pair in parts.query.split("&") if parts.query else []:
+        name, _, val = pair.partition("=")
+        if not val or _REFERENCE.search(val):
+            continue
+        if looks_secret_name(name) or redact_text(val) != val:
+            return True
+    return False
 
 
 def last_four(secret: str) -> str:

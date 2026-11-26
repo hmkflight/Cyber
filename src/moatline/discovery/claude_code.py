@@ -21,7 +21,7 @@ from typing import Any
 from moatline.discovery.base import ScanContext, list_children, read_json, system_dir
 from moatline.discovery.common import scan_hooks_block, scan_mcp_block
 from moatline.models import Asset, ScanError, ScanResult
-from moatline.redact import names_only, redact_list, redact_text, redact_url
+from moatline.redact import literal_secret_names, names_only, redact_list, redact_text, redact_url
 
 PLATFORM = "claude_code"
 
@@ -136,6 +136,7 @@ def _scan_settings(data: dict[str, Any], scope: str, path: Path, result: ScanRes
         "deny_rule_count": len(permissions.get("deny", [])) if isinstance(permissions.get("deny"), list) else 0,
         "sandbox_enabled": sandbox.get("enabled"),
         "env_names": names_only(data.get("env")),
+        "literal_secret_names": literal_secret_names(data.get("env")),
         "enabled_plugins": sorted(name for name, on in enabled_plugins.items() if on is True),
         "hook_count": hook_count,
     }

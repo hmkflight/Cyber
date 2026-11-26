@@ -154,9 +154,12 @@ _SECRET_NAME = re.compile(
 _REFERENCE = re.compile(r"\$\{|^\$[A-Za-z_]|\{env:|\{input:")
 
 
+_CAMEL = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+
+
 def looks_secret_name(name: Any) -> bool:
-    """True for names like GITHUB_TOKEN, X-Api-Key or Authorization."""
-    return bool(_SECRET_NAME.search(str(name)))
+    """True for names like GITHUB_TOKEN, X-Api-Key, Authorization or accessToken."""
+    return bool(_SECRET_NAME.search(_CAMEL.sub("_", str(name))))
 
 
 def literal_secret_names(mapping: Any) -> list[str]:
@@ -174,7 +177,7 @@ def literal_secret_names(mapping: Any) -> list[str]:
             continue
         if _REFERENCE.search(value) or _plain_setting(value):
             continue
-        if _SECRET_NAME.search(str(name)) or redact_text(value) != value:
+        if looks_secret_name(name) or redact_text(value) != value:
             found.append(str(name))
     return sorted(found)
 
@@ -208,7 +211,7 @@ def url_has_secret(value: Any) -> bool:
         name, _, val = pair.partition("=")
         if not val or _REFERENCE.search(val):
             continue
-        if _SECRET_NAME.search(name) or redact_text(val) != val:
+        if looks_secret_name(name) or redact_text(val) != val:
             return True
     return False
 

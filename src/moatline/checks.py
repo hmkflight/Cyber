@@ -250,15 +250,21 @@ def check_sandbox(result: ScanResult, ctx: ScanContext) -> list[Finding]:
             claude_settings.append(asset)
 
     uses_claude = any(a.platform == "claude_code" and a.kind in ("mcp_server", "hook", "plugin") for a in result.assets)
-    if (claude_settings or uses_claude) and not any(a.details.get("sandbox_enabled") is True for a in claude_settings):
+    on = {a.scope for a in claude_settings if a.details.get("sandbox_enabled") is True}
+    # A project's own settings only cover that project, so they don't count as "on".
+    if (claude_settings or uses_claude) and not on & {"user", "managed"}:
         where = next((a for a in claude_settings if a.scope == "user"), None) or Asset(
             "settings_file", "claude_code", "user", "settings.json", str(ctx.home / ".claude" / "settings.json"), {}
         )
+        only_here = bool(on & {"project", "local"})
         findings.append(_finding(
-            "ML003", "low", "Claude Code's sandbox is not turned on", where,
+            "ML003", "low",
+            "Claude Code's sandbox is only on for this project" if only_here else "Claude Code's sandbox is not turned on",
+            where,
             "Without the sandbox, shell commands Claude runs can reach any file and any website your account can.",
             "Run /sandbox in Claude Code, or add \"sandbox\": {\"enabled\": true} to ~/.claude/settings.json.",
-            "ASI05", "sandbox.enabled is not set in any Claude Code settings file",
+            "ASI05",
+            "on in this project's settings only" if only_here else "sandbox.enabled is not set in any Claude Code settings file",
         ))
     return findings
 

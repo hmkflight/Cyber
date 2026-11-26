@@ -167,9 +167,16 @@ def test_claude_sandbox_reported_even_without_a_settings_file(empty_env):
     assert finding.source.endswith("settings.json")
 
 
-def test_claude_sandbox_on_anywhere_is_fine(empty_env):
+def test_claude_sandbox_on_only_in_the_project_is_still_reported(empty_env):
     _write(empty_env.home / ".claude" / "settings.json", {})
     _write(empty_env.project / ".claude" / "settings.json", {"sandbox": {"enabled": True}})
+    [finding] = _findings(empty_env, "ML003")
+    assert finding.title == "Claude Code's sandbox is only on for this project"
+
+
+def test_claude_sandbox_on_for_the_user_is_fine(empty_env):
+    _write(empty_env.home / ".claude" / "settings.json", {"sandbox": {"enabled": True}})
+    _write(empty_env.project / ".claude" / "settings.json", {})
     assert _findings(empty_env, "ML003") == []
 
 
@@ -199,6 +206,15 @@ def test_literal_secret_in_env_and_header_is_high(empty_env):
     assert finding.severity == "high"
     assert finding.evidence == "names: Authorization"
     assert FAKE_SECRETS[0] not in finding.to_dict().__repr__()
+
+
+def test_camel_case_secret_names_are_found(empty_env):
+    _write(
+        empty_env.home / ".cursor" / "mcp.json",
+        {"mcpServers": {"x": {"command": "node", "args": ["x.js"], "env": {"accessToken": "plainFAKE", "clientSecret": "alsoFAKE", "monkeyMode": "plain"}}}},
+    )
+    [finding] = _findings(empty_env, "ML004")
+    assert finding.evidence == "names: accessToken, clientSecret"
 
 
 def test_secret_in_url_query_is_found(empty_env):
@@ -371,6 +387,14 @@ def test_home_path_hidden_inside_commands(empty_env):
         assert "python3 ~/hooks/check.py" in output
 
 
+def test_terminal_escape_codes_are_not_printed(empty_env):
+    name = "evil\x1b[2J\x1b[32mNo risky settings found\u202e"
+    _write(empty_env.project / ".mcp.json", {"mcpServers": {name: {"command": "node", "args": ["x.js"]}}})
+    text = to_text(run_all(empty_env), empty_env)
+    assert "\x1b" not in text and "\u202e" not in text
+    assert "evil\\x{1b}[2J" in text
+
+
 def test_broken_check_becomes_an_error_not_a_crash(empty_env, monkeypatch):
     def broken(result, ctx):
         raise ValueError("boom")
@@ -396,12 +420,13 @@ def test_checks_ignore_odd_detail_values(empty_env):
     run_checks(result, empty_env)  # must not raise
 
 
-_TOOL_ENV = ("CLAUDE_CONFIG_DIR", "COPILOT_HOME", "CODEX_HOME", "GEMINI_CLI_SYSTEM_SETTINGS_PATH", "GEMINI_CLI_SYSTEM_DEFAULTS_PATH")
+def _use_fake_machine(monkeypatch, ctx: ScanContext) -> None:
+    """Make the CLI scan only the fake folders, never this computer's real system folders."""
+    monkeypatch.setattr(ScanContext, "from_environment", classmethod(lambda cls, project=None, home=None: ctx))
 
 
 def test_fail_on_exit_codes(fake_env, monkeypatch, capsys):
-    for name in _TOOL_ENV:
-        monkeypatch.delenv(name, raising=False)
+    _use_fake_machine(monkeypatch, fake_env)
     base = ["scan", "--home", str(fake_env.home), "--project", str(fake_env.project)]
     assert main(base) == 0
     assert main([*base, "--fail-on", "high"]) == 1
@@ -409,8 +434,7 @@ def test_fail_on_exit_codes(fake_env, monkeypatch, capsys):
 
 
 def test_fail_on_passes_when_clean(empty_env, monkeypatch, capsys):
-    for name in _TOOL_ENV:
-        monkeypatch.delenv(name, raising=False)
+    _use_fake_machine(monkeypatch, empty_env)
     _safe_claude_settings(empty_env)
     code = main(["scan", "--home", str(empty_env.home), "--project", str(empty_env.project), "--fail-on", "low"])
     capsys.readouterr()

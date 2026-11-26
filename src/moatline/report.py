@@ -51,6 +51,18 @@ def _shorten(text: str, home: Path) -> str:
     return text
 
 
+def _printable(line: str) -> str:
+    """Show control and invisible formatting characters as \\x.. codes.
+
+    Config files can be written by others (a cloned repo's .mcp.json). Without
+    this, a server name holding terminal escape codes could clear the screen or
+    fake a clean report.
+    """
+    if line.isprintable():
+        return line
+    return "".join(ch if ch.isprintable() else f"\\x{{{ord(ch):x}}}" for ch in line)
+
+
 def _clean(value: Any, home: Path) -> Any:
     if isinstance(value, str):
         return _shorten(value, home)
@@ -260,4 +272,4 @@ def to_text(result: ScanResult, ctx: ScanContext, findings: list[Finding] | None
     lines.append("")
     lines.append("This scan is read-only. No files were changed and nothing was sent over the network.")
     lines.append("Secret values are never shown; only the names of environment variables and headers.")
-    return "\n".join(lines)
+    return "\n".join(_printable(line) for line in lines)

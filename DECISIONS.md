@@ -20,3 +20,5 @@ One line per decision, newest at the bottom. Format: date: decision (why).
 - 2026-11-25: An MCP package is "pinned" only with an exact version (npm `x.y.z`, Python `==` or `@version`, Docker tag or digest). Ranges like `^1.2` still update on their own.
 - 2026-11-25: The home folder is replaced with `~` anywhere it appears in a report, including inside hook commands.
 - 2026-11-25: "Shared credentials" (ML010) compares key names only, never values: the same secret-looking variable or header name used by MCP servers in two or more AI tools.
+- 2026-11-25: The text report shows control and invisible characters as \x{..} codes, so a hostile config (for example a cloned repo's .mcp.json) can't use terminal escape codes to hide findings or fake a clean report.
+- 2026-11-25: Claude Code's sandbox counts as "on" only when user or managed settings turn it on; a project's own settings cover just that project.

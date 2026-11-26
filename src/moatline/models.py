@@ -42,6 +42,38 @@ class ScanError:
         return asdict(self)
 
 
+SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
+
+
+@dataclass(frozen=True)
+class Finding:
+    """A risk found in the scanned configuration, explained in plain language.
+
+    check_id: stable ID such as "ML001", so findings can be tracked over time
+    severity: high, medium or low
+    title: one short line a non-expert understands
+    why: one sentence on why it matters
+    fix: one sentence on what to do
+    owasp: the matching OWASP Top 10 for Agentic Applications risk
+    evidence: the exact setting, already redacted
+    """
+
+    check_id: str
+    severity: str
+    title: str
+    platform: str
+    scope: str
+    asset: str
+    source: str
+    why: str
+    fix: str
+    owasp: str
+    evidence: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
 @dataclass
 class ScanResult:
     assets: list[Asset] = field(default_factory=list)

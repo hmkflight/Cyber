@@ -7,12 +7,14 @@ doesn't reveal the username.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
 from moatline import __version__
+from moatline.checks import counts_by_severity, run_checks
 from moatline.discovery.base import ScanContext
-from moatline.models import Asset, ScanResult
+from moatline.models import Asset, Finding, ScanResult
 
 KIND_TITLES = {
     "mcp_server": "MCP servers",
@@ -38,14 +40,15 @@ PLATFORM_TITLES = {
 PLATFORM_ORDER = list(PLATFORM_TITLES)
 
 
-def _shorten(path: str, home: Path) -> str:
-    home_str = str(home)
-    if path == home_str:
-        return "~"
-    for sep in ("/", "\\"):
-        if path.startswith(home_str + sep):
-            return "~" + sep + path[len(home_str) + 1 :]
-    return path
+def _shorten(text: str, home: Path) -> str:
+    """Replace the home folder with ~ wherever it appears, e.g. inside a hook command."""
+    # Windows configs may spell the home folder with either slash.
+    for home_str in {str(home).rstrip("/\\"), home.as_posix().rstrip("/")}:
+        if len(home_str) < 2:
+            continue
+        # Only a whole path part: /Users/hudson must not match /Users/hudson2.
+        text = re.sub(re.escape(home_str) + r"(?=[/\\\s\"'=:;,)]|$)", "~", text)
+    return text
 
 
 def _clean(value: Any, home: Path) -> Any:
@@ -58,13 +61,17 @@ def _clean(value: Any, home: Path) -> Any:
     return value
 
 
-def to_json(result: ScanResult, ctx: ScanContext) -> str:
+def to_json(result: ScanResult, ctx: ScanContext, findings: list[Finding] | None = None) -> str:
+    if findings is None:
+        findings = run_checks(result, ctx)
     payload = {
         "tool": "moatline",
         "version": __version__,
         "read_only": True,
         "project": _shorten(str(ctx.project), ctx.home),
         "summary": result.count_by_kind(),
+        "finding_counts": counts_by_severity(findings),
+        "findings": [_clean(f.to_dict(), ctx.home) for f in findings],
         "assets": [_clean(a.to_dict(), ctx.home) for a in result.assets],
         "errors": [_clean(e.to_dict(), ctx.home) for e in result.errors],
         "scanned_files": [_shorten(p, ctx.home) for p in result.scanned_files],
@@ -181,7 +188,30 @@ def _describe_settings(d: dict[str, Any]) -> str:
     return "; ".join(bits)
 
 
-def to_text(result: ScanResult, ctx: ScanContext) -> str:
+def _findings_lines(findings: list[Finding], ctx: ScanContext) -> list[str]:
+    counts = counts_by_severity(findings)
+    lines = ["", f"Findings: {counts['high']} high, {counts['medium']} medium, {counts['low']} low"]
+    if not findings:
+        lines.append("  No risky settings found.")
+        return lines
+    for finding in findings:
+        f = Finding(**_clean(finding.to_dict(), ctx.home))
+        lines.append("")
+        lines.append(f"  [{f.severity.upper()}] {f.title}")
+        tool = PLATFORM_TITLES.get(f.platform, f.platform)
+        item = "" if f.asset == Path(f.source).name else f"'{f.asset}' in "
+        lines.append(f"      Where: {tool}, {item}{f.source}")
+        if f.evidence:
+            lines.append(f"      Found: {f.evidence}")
+        lines.append(f"      Why it matters: {f.why}")
+        lines.append(f"      How to fix: {f.fix}")
+        lines.append(f"      OWASP: {f.owasp} ({f.check_id})")
+    return lines
+
+
+def to_text(result: ScanResult, ctx: ScanContext, findings: list[Finding] | None = None) -> str:
+    if findings is None:
+        findings = run_checks(result, ctx)
     lines: list[str] = []
     lines.append(f"Moatline Agent Inventory Scan v{__version__}")
     lines.append(f"Project folder: {_shorten(str(ctx.project), ctx.home)}")
@@ -198,6 +228,7 @@ def to_text(result: ScanResult, ctx: ScanContext) -> str:
         for kind in KIND_ORDER:
             if kind in counts:
                 lines.append(f"  {KIND_TITLES[kind]}: {counts[kind]}")
+        lines.extend(_findings_lines(findings, ctx))
 
     found = {a.platform for a in result.assets}
     platforms = [p for p in PLATFORM_ORDER if p in found] + sorted(found - set(PLATFORM_ORDER))
@@ -222,7 +253,7 @@ def to_text(result: ScanResult, ctx: ScanContext) -> str:
 
     if result.errors:
         lines.append("")
-        lines.append("Files that could not be read")
+        lines.append("Problems during the scan")
         for error in result.errors:
             lines.append(f"  - {_shorten(error.source, ctx.home)}: {error.reason}")
 

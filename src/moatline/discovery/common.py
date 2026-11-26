@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from moatline.models import Asset, ScanError, ScanResult
-from moatline.redact import names_only, redact_list, redact_text, redact_url
+from moatline.redact import literal_secret_names, names_only, redact_list, redact_text, redact_url, url_has_secret
 
 _STDIO = {"stdio", "local"}
 
@@ -67,6 +67,8 @@ def scan_mcp_block(
         for url_key in ("httpUrl", "url", "serverUrl"):
             if url_key in server:
                 details["url"] = redact_url(str(server[url_key]))
+                if url_has_secret(str(server[url_key])):
+                    details["url_has_secret"] = True
                 break
         details["env_names"] = sorted(
             set(names_only(server.get("env"))) | set(_string_list(server.get("env_vars")))
@@ -76,6 +78,14 @@ def scan_mcp_block(
             | set(names_only(server.get("http_headers")))
             | set(names_only(server.get("env_http_headers")))
         )
+        # env_http_headers holds variable names, not values, so it is left out here.
+        literal = sorted(
+            set(literal_secret_names(server.get("env")))
+            | set(literal_secret_names(server.get("headers")))
+            | set(literal_secret_names(server.get("http_headers")))
+        )
+        if literal:
+            details["literal_secret_names"] = literal
         if server.get("bearer_token_env_var"):
             details["token_env_var"] = redact_text(str(server["bearer_token_env_var"]))
         for flag in _SERVER_FLAGS:
@@ -114,6 +124,11 @@ def _handler_details(event: str, matcher: Any, handler: dict[str, Any]) -> dict[
     if "url" in handler:
         details["url"] = redact_url(str(handler["url"]))
         details["header_names"] = names_only(handler.get("headers"))
+        literal = literal_secret_names(handler.get("headers"))
+        if literal:
+            details["literal_secret_names"] = literal
+        if url_has_secret(str(handler["url"])):
+            details["url_has_secret"] = True
     if "prompt" in handler:
         details["prompt_preview"] = redact_text(str(handler["prompt"])[:120])
     for key in ("timeout", "timeoutSec", "onFailure", "failClosed", "name"):

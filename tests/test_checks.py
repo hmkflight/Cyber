@@ -204,7 +204,7 @@ def test_literal_secret_in_env_and_header_is_high(empty_env):
     [finding] = _findings(empty_env, "ML004")
     assert finding.asset == "linear"
     assert finding.severity == "high"
-    assert finding.evidence == "names: Authorization"
+    assert finding.evidence == "names: Authorization (ends in ...1234)"
     assert FAKE_SECRETS[0] not in finding.to_dict().__repr__()
 
 
@@ -231,7 +231,24 @@ def test_harmless_url_query_is_not_a_secret(empty_env):
 def test_literal_secret_in_claude_settings_env(empty_env):
     _write(empty_env.home / ".claude" / "settings.json", {"env": {"ANTHROPIC_AUTH_TOKEN": FAKE_SECRETS[0], "MAX_THINKING_TOKENS": "8000"}, "sandbox": {"enabled": True}})
     [finding] = _findings(empty_env, "ML004")
-    assert finding.evidence == "names: ANTHROPIC_AUTH_TOKEN"
+    assert finding.evidence == "names: ANTHROPIC_AUTH_TOKEN (ends in ...1234)"
+
+
+def test_short_secrets_never_show_an_ending(empty_env):
+    _write(empty_env.home / ".claude" / "settings.json", {"env": {"DB_PASSWORD": "hunter2-FAKE"}, "sandbox": {"enabled": True}})
+    [finding] = _findings(empty_env, "ML004")
+    assert finding.evidence == "names: DB_PASSWORD"
+
+
+def test_secret_endings_stay_out_of_the_inventory(empty_env):
+    _write(empty_env.home / ".claude" / "settings.json", {"env": {"OPENAI_API_KEY": FAKE_SECRETS[0]}, "sandbox": {"enabled": True}})
+    result = run_all(empty_env)
+    [settings] = [a for a in result.assets if a.kind == "settings_file"]
+    assert settings.secret_endings == {"OPENAI_API_KEY": "1234"}
+    assert "secret_endings" not in settings.to_dict()
+    assert "1234" not in repr(settings)
+    payload = json.loads(to_json(result, empty_env, findings=[]))
+    assert "1234" not in json.dumps(payload["assets"])
 
 
 def test_secret_in_command_line(empty_env):

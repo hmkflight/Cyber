@@ -17,6 +17,9 @@ class Asset:
     name: a short label for people
     source: the file or folder it was found in
     details: extra facts, already passed through redaction
+    secret_endings: last 4 characters of long secrets typed into the file, by
+          name. Kept apart from details so it never appears in the inventory;
+          only the "secret typed into a file" finding uses it.
     """
 
     kind: str
@@ -25,9 +28,12 @@ class Asset:
     name: str
     source: str
     details: dict[str, Any] = field(default_factory=dict)
+    secret_endings: dict[str, str] = field(default_factory=dict, repr=False, compare=False)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        data.pop("secret_endings")
+        return data
 
 
 @dataclass(frozen=True)
@@ -69,6 +75,9 @@ class Finding:
     fix: str
     owasp: str
     evidence: str = ""
+    # Title for several findings of the same kind, with {n} for the count,
+    # e.g. "{n} MCP servers download their newest version every time they start".
+    group_title: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

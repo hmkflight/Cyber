@@ -2,7 +2,7 @@
 
 Moatline finds every AI-agent configuration on a machine and lists what each agent can reach: MCP servers, hooks, plugins, skills, subagents, custom commands and settings. It is the free first step of the Moatline catalog.
 
-## What it covers today (v0.1.0)
+## What it covers today (v0.2.0)
 
 | AI tool | What the scan reads |
 |---|---|
@@ -32,7 +32,20 @@ After the inventory, the report lists risky settings, most serious first. Each f
 | ML009 | Plugin or extension from a third-party marketplace | Low | ASI04 Supply chain |
 | ML010 | The same key (for example `GITHUB_TOKEN`) given to MCP servers in two or more AI tools | Low | ASI03 Identity and privilege |
 
-Findings show names, never secret values.
+Findings show names, never secret values. For a long key typed into a file, the finding also shows its last 4 characters (for example `OPENAI_API_KEY (ends in ...a1b2)`) so you know which key to replace. Keys shorter than 20 characters show nothing.
+
+Findings of the same kind are grouped, for example "3 MCP servers download their newest version every time they start", with each place listed underneath. Within each level, exposed keys come first.
+
+## Reports
+
+| Format | Use it for |
+|---|---|
+| `text` (default) | Reading in the terminal |
+| `markdown` | A report to read or share with someone non-technical: top 3 fixes first, then every finding, then what's installed |
+| `json` | Other programs |
+| `sarif` | GitHub's security tab (code scanning). GitHub accepts it on public repos, or on private repos with GitHub Code Security turned on |
+
+`--output FILE` saves the report to a new file instead of printing it. Moatline never overwrites a file: if `FILE` already exists, it stops and asks for a new name.
 
 ## Safety promises
 
@@ -62,6 +75,8 @@ moatline scan                      # scan your machine and the current project f
 moatline scan --project ~/code/app # scan a different project folder
 moatline scan --format json        # machine-readable output
 moatline scan --fail-on high       # exit code 1 if anything high is found (for CI)
+moatline scan --format markdown --output report.md   # save a shareable report
+moatline scan --format sarif --output moatline.sarif # for GitHub's security tab
 ```
 
 ## Develop

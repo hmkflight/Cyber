@@ -10,6 +10,7 @@ Every finding maps to the OWASP Top 10 for Agentic Applications (2026).
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable
 
@@ -58,7 +59,15 @@ def _tool(asset: Asset) -> str:
 
 
 def _finding(
-    check_id: str, severity: str, title: str, asset: Asset, why: str, fix: str, owasp: str, evidence: str = ""
+    check_id: str,
+    severity: str,
+    title: str,
+    asset: Asset,
+    why: str,
+    fix: str,
+    owasp: str,
+    evidence: str = "",
+    group: str = "",
 ) -> Finding:
     return Finding(
         check_id=check_id,
@@ -72,6 +81,7 @@ def _finding(
         fix=fix,
         owasp=OWASP[owasp],
         evidence=evidence[:200],
+        group_title=group,
     )
 
 
@@ -168,6 +178,7 @@ def check_unpinned_packages(result: ScanResult, ctx: ScanContext) -> list[Findin
                 "A new release, or a hijacked one, runs on your machine automatically without anyone checking it first.",
                 "Pin an exact version (for example name@1.2.3) and update on purpose after reviewing what changed.",
                 "ASI04", f"{command} {spec}",
+                group="{n} MCP servers download their newest version every time they start",
             ))
     return findings
 
@@ -195,6 +206,7 @@ def check_acts_without_asking(result: ScanResult, ctx: ScanContext) -> list[Find
                 "An allow rule this wide lets every command through, including ones that delete files or send data out.",
                 "Replace it with rules for specific commands, such as Bash(npm run test *).",
                 "ASI02", "allow: " + ", ".join(broad),
+                group="{n} Claude Code settings files let any shell command run without asking",
             ))
         if d.get("approval_policy") == "never":
             findings.append(_finding(
@@ -202,6 +214,7 @@ def check_acts_without_asking(result: ScanResult, ctx: ScanContext) -> list[Find
                 "Codex can run commands and change files with no approval step.",
                 "Set approval_policy to \"on-request\" or \"untrusted\" in config.toml.",
                 "ASI02", "approval_policy = never",
+                group="{n} Codex settings files never ask before running commands",
             ))
         if d.get("default_approval_mode") in ("auto_edit", "yolo"):
             yolo = d["default_approval_mode"] == "yolo"
@@ -220,6 +233,7 @@ def check_acts_without_asking(result: ScanResult, ctx: ScanContext) -> list[Find
                 "Marking a server as trusted skips the confirmation step for everything it can do.",
                 "Remove \"trust\": true, or limit the server to read-only tools with includeTools.",
                 "ASI02", "trust: true",
+                group="{n} servers run every tool without asking",
             ))
     return findings
 
@@ -238,6 +252,7 @@ def check_sandbox(result: ScanResult, ctx: ScanContext) -> list[Finding]:
                 "Commands Codex runs can read and change anything your account can, including other projects and keys.",
                 "Set sandbox_mode to \"workspace-write\" in config.toml.",
                 "ASI05", "sandbox_mode = danger-full-access",
+                group="{n} Codex settings files turn the sandbox off",
             ))
         if d.get("folder_trust") is False:
             findings.append(_finding(
@@ -282,12 +297,14 @@ def check_secrets(result: ScanResult, ctx: ScanContext) -> list[Finding]:
                 "mcp_server": f"the '{asset.name}' server settings",
                 "hook": f"the '{asset.name}' hook",
             }.get(asset.kind, Path(asset.source).name)
-            found = (["names: " + ", ".join(names)] if names else []) + (["a key or password inside its URL"] if in_url else [])
+            labelled = [f"{n} (ends in ...{asset.secret_endings[n]})" if n in asset.secret_endings else n for n in names]
+            found = (["names: " + ", ".join(labelled)] if names else []) + (["a key or password inside its URL"] if in_url else [])
             findings.append(_finding(
                 "ML004", "high", f"Secret typed directly into {where}", asset,
                 "Anything that can read this file, including AI agents, backups and synced folders, can read the key.",
                 "Move the value into an environment variable or your keychain, reference it as ${NAME}, then rotate the key.",
                 "ASI03", "; ".join(found),
+                group="Secrets typed directly into {n} config entries",
             ))
         if asset.kind not in ("mcp_server", "hook"):
             continue
@@ -298,6 +315,7 @@ def check_secrets(result: ScanResult, ctx: ScanContext) -> list[Finding]:
                 "Command lines show up in process lists and logs, where other programs on the machine can read them.",
                 "Pass the secret through an environment variable instead of a command-line argument, then rotate it.",
                 "ASI03", line,
+                group="Secrets written into {n} command lines",
             ))
     return findings
 
@@ -329,6 +347,7 @@ def check_reach(result: ScanResult, ctx: ScanContext) -> list[Finding]:
                 + (", and it can act on money, messages or data." if high_impact else "."),
                 "Remove it from the home-folder entry and add it only to the project folder that needs it.",
                 "ASI03", "registered for project folder ~",
+                group="{n} MCP servers are switched on for your whole home folder",
             ))
         elif high_impact and asset.scope == "user":
             findings.append(_finding(
@@ -336,6 +355,7 @@ def check_reach(result: ScanResult, ctx: ScanContext) -> list[Finding]:
                 "A tool that can move money, send messages or change data is within reach of every agent session.",
                 "Limit it to the projects that need it, or allow only its read-only tools.",
                 "ASI03", str(asset.details.get("url") or asset.details.get("command") or ""),
+                group="{n} powerful tools are available in every project",
             ))
     return findings
 
@@ -354,6 +374,7 @@ def check_project_hooks(result: ScanResult, ctx: ScanContext) -> list[Finding]:
             "Whoever can change this project, such as a teammate or the author of a cloned repo, decides what runs on your computer.",
             "Read the hook and its script before trusting the folder, and review changes to it like code.",
             "ASI05", f"{asset.details.get('event', '')}: {action}",
+            group="This project runs {n} hooks automatically",
         ))
     return findings
 
@@ -381,6 +402,7 @@ def check_plain_http(result: ScanResult, ctx: ScanContext) -> list[Finding]:
             "Plain http lets anyone on the same network read or change what the agent sends and receives.",
             "Switch to the server's https:// address.",
             "ASI07", url,
+            group="{n} connections to remote servers are not encrypted",
         ))
     return findings
 
@@ -397,16 +419,18 @@ def check_third_party_extensions(result: ScanResult, ctx: ScanContext) -> list[F
         findings.append(_finding(
             "ML009", "low", f"Plugin '{asset.name}' comes from a third-party marketplace", asset,
             "Plugins run with your full user permissions, and their files can change whenever they update.",
-            "Check who publishes it and look at its hooks and MCP servers before keeping it.",
+            "Before keeping a plugin, check who publishes it and look at its hooks and MCP servers.",
             "ASI04", f"marketplace: {marketplace}",
+            group="{n} plugins come from third-party marketplaces",
         ))
     for asset in _of_kind(result, "extension"):
         d = asset.details
         findings.append(_finding(
             "ML009", "low", f"{_tool(asset)} extension '{asset.name}' is installed", asset,
             "Extensions can add tools and hooks that run with your user permissions.",
-            "Check who publishes it and look at what it adds before keeping it.",
+            "Before keeping an extension, check who publishes it and look at what it adds.",
             "ASI04", f"adds {d.get('mcp_server_count', 0)} MCP server(s) and {d.get('hook_count', 0)} hook(s)",
+            group="{n} " + _tool(asset) + " extensions are installed",
         ))
     return findings
 
@@ -437,8 +461,33 @@ def check_shared_credentials(result: ScanResult, ctx: ScanContext) -> list[Findi
             "If any one of these agents is tricked into leaking or misusing the key, all of them are exposed, and you can't tell which one did it.",
             "Give each AI tool its own key with only the access it needs, so you can revoke one without breaking the others.",
             "ASI03", "used by " + ", ".join(f"{_tool(a)} '{a.name}'" for a in assets),
+            group="{n} keys are shared by several AI tools",
         ))
     return findings
+
+
+@dataclass(frozen=True)
+class Rule:
+    """What one check looks for, for report guides and SARIF."""
+
+    name: str  # short CamelCase name, e.g. "UnpinnedPackage"
+    summary: str  # what it looks for, in plain words
+    owasp: str  # OWASP Agentic code, e.g. "ASI04"
+    worst: str  # the most serious severity this check can report
+
+
+RULES: dict[str, Rule] = {
+    "ML001": Rule("UnpinnedPackage", "An MCP server downloads its newest version every time it starts.", "ASI04", "medium"),
+    "ML002": Rule("ActsWithoutAsking", "An AI agent is set to act without asking you first.", "ASI02", "high"),
+    "ML003": Rule("SandboxOff", "An AI agent runs commands without a sandbox.", "ASI05", "high"),
+    "ML004": Rule("SecretInConfig", "A secret is typed directly into a config file or URL.", "ASI03", "high"),
+    "ML005": Rule("SecretInCommandLine", "A secret is written into a command line.", "ASI03", "high"),
+    "ML006": Rule("BroadReach", "A powerful tool is reachable from far more places than it needs.", "ASI03", "high"),
+    "ML007": Rule("ProjectHook", "A project folder runs its own hook automatically.", "ASI05", "medium"),
+    "ML008": Rule("PlainHttp", "An agent talks to a remote server without encryption.", "ASI07", "medium"),
+    "ML009": Rule("ThirdPartyExtension", "A plugin or extension comes from a third party.", "ASI04", "low"),
+    "ML010": Rule("SharedCredential", "The same key is given to several AI tools.", "ASI03", "low"),
+}
 
 
 CHECKS: list[Callable[[ScanResult, ScanContext], list[Finding]]] = [
@@ -454,6 +503,15 @@ CHECKS: list[Callable[[ScanResult, ScanContext], list[Finding]]] = [
 ]
 
 
+# Within one severity, the order a person should fix things: exposed keys first,
+# then powerful tools within reach, then agents acting on their own.
+FIX_ORDER = ["ML004", "ML005", "ML006", "ML002", "ML003", "ML008", "ML007", "ML001", "ML010", "ML009"]
+
+
+def _priority(check_id: str) -> int:
+    return FIX_ORDER.index(check_id) if check_id in FIX_ORDER else len(FIX_ORDER)
+
+
 def run_checks(result: ScanResult, ctx: ScanContext) -> list[Finding]:
     """Run every check. A bug in one check is reported as an error and never hides the others."""
     findings: list[Finding] = []
@@ -464,7 +522,7 @@ def run_checks(result: ScanResult, ctx: ScanContext) -> list[Finding]:
             error = ScanError("moatline", f"risk check {check.__name__}", f"check failed ({type(exc).__name__})")
             if error not in result.errors:
                 result.errors.append(error)
-    return sorted(findings, key=lambda f: (SEVERITY_ORDER.get(f.severity, 9), f.check_id, f.platform, f.asset))
+    return sorted(findings, key=lambda f: (SEVERITY_ORDER.get(f.severity, 9), _priority(f.check_id), f.platform, f.asset))
 
 
 def counts_by_severity(findings: list[Finding]) -> dict[str, int]:

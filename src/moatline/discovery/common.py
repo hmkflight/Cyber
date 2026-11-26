@@ -11,7 +11,15 @@ from pathlib import Path
 from typing import Any
 
 from moatline.models import Asset, ScanError, ScanResult
-from moatline.redact import literal_secret_names, names_only, redact_list, redact_text, redact_url, url_has_secret
+from moatline.redact import (
+    literal_secret_names,
+    names_only,
+    redact_list,
+    redact_text,
+    redact_url,
+    secret_endings,
+    url_has_secret,
+)
 
 _STDIO = {"stdio", "local"}
 
@@ -96,7 +104,8 @@ def scan_mcp_block(
                 details[key] = redact_list(server[key])
         if extra:
             details.update(extra)
-        result.assets.append(Asset("mcp_server", platform, scope, str(name), str(path), details))
+        endings = secret_endings(server.get("env"), server.get("headers"), server.get("http_headers"))
+        result.assets.append(Asset("mcp_server", platform, scope, str(name), str(path), details, endings))
     return count
 
 
@@ -165,7 +174,8 @@ def scan_hooks_block(hooks_block: Any, platform: str, scope: str, path: Path, re
                 count += 1
                 details = _handler_details(str(event), matcher, handler)
                 label = str(event) + (f" [{details['matcher']}]" if details["matcher"] else "")
-                result.assets.append(Asset("hook", platform, scope, label, str(path), details))
+                endings = secret_endings(handler.get("headers"))
+                result.assets.append(Asset("hook", platform, scope, label, str(path), details, endings))
     return count
 
 

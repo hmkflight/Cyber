@@ -10,8 +10,17 @@ from moatline import __version__
 from moatline.checks import run_checks
 from moatline.discovery import DISCOVERERS, run_all
 from moatline.discovery.base import ScanContext
+from moatline.markdown import to_markdown
 from moatline.models import SEVERITY_ORDER
 from moatline.report import to_json, to_text
+from moatline.sarif import to_sarif
+
+FORMATS = {
+    "text": to_text,
+    "json": to_json,
+    "markdown": to_markdown,
+    "sarif": to_sarif,
+}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -24,7 +33,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     scan = sub.add_parser("scan", help="find agent configs, MCP servers, hooks, plugins and skills")
     scan.add_argument("--project", type=Path, default=None, help="project folder to scan (default: current folder)")
-    scan.add_argument("--format", choices=["text", "json"], default="text", help="output format (default: text)")
+    scan.add_argument(
+        "--format",
+        choices=list(FORMATS),
+        default="text",
+        help="text (default), json, markdown (a report to share) or sarif (for GitHub's security tab)",
+    )
+    scan.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="save the report to this new file instead of printing it (never overwrites an existing file)",
+    )
     scan.add_argument(
         "--platform",
         action="append",
@@ -56,13 +76,32 @@ def main(argv: list[str] | None = None) -> int:
 
     result = run_all(ctx, platforms=args.platform)
     findings = run_checks(result, ctx)
-    output = to_json(result, ctx, findings) if args.format == "json" else to_text(result, ctx, findings)
-    print(output)
+    output = FORMATS[args.format](result, ctx, findings)
+    if args.output is None:
+        print(output)
+    elif not save_new_file(args.output, output):
+        return 2
     if args.fail_on is not None:
         limit = SEVERITY_ORDER[args.fail_on]
         if any(SEVERITY_ORDER.get(f.severity, 9) <= limit for f in findings):
             return 1
     return 0
+
+
+def save_new_file(path: Path, text: str) -> bool:
+    """Write the report to a file that doesn't exist yet. Never overwrites anything."""
+    try:
+        # "x" mode fails if the path already exists, including as a link.
+        with open(path, "x", encoding="utf-8", newline="\n") as handle:
+            handle.write(text.rstrip("\n") + "\n")
+    except FileExistsError:
+        print(f"moatline: {path} already exists. Choose a new file name; Moatline never overwrites files.", file=sys.stderr)
+        return False
+    except OSError as exc:
+        print(f"moatline: could not save the report to {path} ({exc.strerror or 'error'})", file=sys.stderr)
+        return False
+    print(f"Report saved to {path}", file=sys.stderr)
+    return True
 
 
 if __name__ == "__main__":

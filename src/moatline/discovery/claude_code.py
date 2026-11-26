@@ -21,7 +21,7 @@ from typing import Any
 from moatline.discovery.base import ScanContext, list_children, read_json, system_dir
 from moatline.discovery.common import scan_hooks_block, scan_mcp_block
 from moatline.models import Asset, ScanError, ScanResult
-from moatline.redact import literal_secret_names, names_only, redact_list, redact_text, redact_url
+from moatline.redact import literal_secret_names, names_only, redact_list, redact_text, redact_url, secret_endings
 
 PLATFORM = "claude_code"
 
@@ -144,7 +144,9 @@ def _scan_settings(data: dict[str, Any], scope: str, path: Path, result: ScanRes
         if flag in data:
             details[flag] = data[flag] if isinstance(data[flag], bool) else "set"
 
-    result.assets.append(Asset("settings_file", PLATFORM, scope, path.name, str(path), details))
+    result.assets.append(
+        Asset("settings_file", PLATFORM, scope, path.name, str(path), details, secret_endings(data.get("env")))
+    )
 
     for name, entry in marketplaces.items():
         source = entry.get("source") if isinstance(entry, dict) else entry

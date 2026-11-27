@@ -26,7 +26,7 @@ After the inventory, the report lists risky settings, most serious first. Each f
 | ML003 | No sandbox (Codex `danger-full-access`, Claude sandbox off, Gemini folder trust off) | High to low | ASI05 Code execution |
 | ML004 | Secret typed straight into a config file or URL | High | ASI03 Identity and privilege |
 | ML005 | Secret written into a command line | High | ASI03 Identity and privilege |
-| ML006 | MCP server switched on for the whole home folder, or a money, messaging or data tool on everywhere | High to low | ASI03 Identity and privilege |
+| ML006 | A tool that can move money (high) or send messages and change data (medium) is reachable everywhere: installed for every project, or switched on for the whole home folder. Any server on the home folder is at least low | High to low | ASI03 Identity and privilege |
 | ML007 | Hook defined inside a project folder (runs whatever the project author wrote) | Medium | ASI05 Code execution |
 | ML008 | Remote server or hook over plain `http://` | Medium | ASI07 Agent communication |
 | ML009 | Plugin or extension from a third-party marketplace | Low | ASI04 Supply chain |

@@ -44,12 +44,16 @@ OFFICIAL_MARKETPLACES = {
     "claude-tag-plugins",
 }
 
-# Words in a server's name, URL or command that suggest it can move money,
-# send messages, or change data and infrastructure.
-_HIGH_IMPACT = re.compile(
-    r"(?<![a-z])(trading|robinhood|broker|bank|payment|stripe|paypal|plaid|wallet|crypto|coinbase|gmail|email"
-    r"|mail|slack|database|postgres|mysql|mongodb|supabase|aws|azure|gcloud|kubernetes)"
+# Words in a server's name, URL or command that suggest what it can do.
+_MONEY = re.compile(
+    r"(?<![a-z])(trading|trade|robinhood|broker|bank|payment|stripe|paypal|plaid|wallet|crypto|coinbase|alpaca|schwab)"
 )
+_MESSAGES_OR_DATA = re.compile(
+    r"(?<![a-z])(gmail|email|mail|slack|discord|telegram|twilio|database|postgres|mysql|mongodb|supabase"
+    r"|aws|azure|gcloud|kubernetes)"
+)
+# Server names that are safe to put inside a command we suggest copying.
+_SAFE_NAME = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "[::1]"}
 
@@ -87,6 +91,14 @@ def _finding(
 
 def _of_kind(result: ScanResult, kind: str) -> Iterable[Asset]:
     return (a for a in result.assets if a.kind == kind)
+
+
+def _active_servers(result: ScanResult) -> Iterable[Asset]:
+    """MCP servers that are switched on. A disabled server can't be used, so it isn't a live risk."""
+    for asset in _of_kind(result, "mcp_server"):
+        if asset.details.get("enabled") is False or asset.details.get("disabled") is True:
+            continue
+        yield asset
 
 
 # ML001 Auto-updating package ---------------------------------------------------
@@ -167,7 +179,7 @@ def unpinned_package(command: str, args: list[str]) -> str | None:
 
 def check_unpinned_packages(result: ScanResult, ctx: ScanContext) -> list[Finding]:
     findings = []
-    for asset in _of_kind(result, "mcp_server"):
+    for asset in _active_servers(result):
         command = asset.details.get("command")
         if not command:
             continue
@@ -226,7 +238,7 @@ def check_acts_without_asking(result: ScanResult, ctx: ScanContext) -> list[Find
                 "Set general.defaultApprovalMode to \"default\".",
                 "ASI02", f"defaultApprovalMode: {d['default_approval_mode']}",
             ))
-    for asset in _of_kind(result, "mcp_server"):
+    for asset in _active_servers(result):
         if asset.details.get("trust") is True:
             findings.append(_finding(
                 "ML002", "medium", f"{_tool(asset)} runs every tool from '{asset.name}' without asking", asset,
@@ -323,39 +335,67 @@ def check_secrets(result: ScanResult, ctx: ScanContext) -> list[Finding]:
 # ML006 Powerful tool reachable broadly -----------------------------------------
 
 
-def _is_high_impact(asset: Asset) -> bool:
+def _impact(asset: Asset) -> str:
+    """'money', 'data' (messages, data or cloud) or '' for an ordinary tool."""
     d = asset.details
-    text = " ".join([asset.name, str(d.get("url", "")), str(d.get("command", "")), *map(str, d.get("args", []))])
-    return bool(_HIGH_IMPACT.search(text.lower()))
+    text = " ".join([asset.name, str(d.get("url", "")), str(d.get("command", "")), *map(str, d.get("args", []))]).lower()
+    if _MONEY.search(text):
+        return "money"
+    if _MESSAGES_OR_DATA.search(text):
+        return "data"
+    return ""
+
+
+_IMPACT_SEVERITY = {"money": "high", "data": "medium", "": "low"}
+_IMPACT_WHY = {
+    "money": "If any agent is tricked, for example by a web page or file it reads, it could try to use this tool to move money.",
+    "data": "If any agent is tricked, for example by a web page or file it reads, it could try to use this tool to send messages or change data.",
+}
 
 
 def _norm_path(path: str) -> str:
     return path.replace("\\", "/").rstrip("/").casefold()
 
 
+def _narrow_fix(asset: Asset, scope_flag: str) -> str:
+    if asset.platform == "claude_code" and _SAFE_NAME.match(asset.name):
+        # Local scope is stored per folder, so the command must run from the home folder.
+        prefix = "cd ~ && " if scope_flag == "local" else ""
+        return (
+            f"Run: {prefix}claude mcp remove {asset.name} --scope {scope_flag}. "
+            "Then add it again from inside the project folder that needs it."
+        )
+    if asset.platform == "codex":
+        return (
+            "Remove it from ~/.codex/config.toml and add it only to the project that needs it "
+            "(.codex/config.toml inside that project), or allow only its read-only tools with enabled_tools."
+        )
+    return "Remove it from your global settings and add it only to the project that needs it, or allow only its read-only tools."
+
+
 def check_reach(result: ScanResult, ctx: ScanContext) -> list[Finding]:
+    """A tool counts as reachable everywhere if it's installed for the user or registered for the home folder."""
     findings = []
     home = _norm_path(str(ctx.home))
-    for asset in _of_kind(result, "mcp_server"):
-        high_impact = _is_high_impact(asset)
-        project_path = _norm_path(str(asset.details.get("project_path") or ""))
-        if project_path and project_path == home:
+    for asset in _active_servers(result):
+        impact = _impact(asset)
+        on_home = _norm_path(str(asset.details.get("project_path") or "")) == home
+        if on_home:
+            why = "Any agent started from your home folder can use it, which is far more often than one project needs."
+            why += f" {_IMPACT_WHY[impact]}" if impact else " This is usually set up by accident."
             findings.append(_finding(
-                "ML006", "high" if high_impact else "medium",
-                f"'{asset.name}' is switched on for your whole home folder", asset,
-                "Agents started from your home folder can use it, which is far more often than one project needs"
-                + (", and it can act on money, messages or data." if high_impact else "."),
-                "Remove it from the home-folder entry and add it only to the project folder that needs it.",
-                "ASI03", "registered for project folder ~",
+                "ML006", _IMPACT_SEVERITY[impact], f"'{asset.name}' is switched on for your whole home folder", asset,
+                why, _narrow_fix(asset, "local"), "ASI03", "registered for project folder ~",
                 group="{n} MCP servers are switched on for your whole home folder",
             ))
-        elif high_impact and asset.scope == "user":
+        elif impact and asset.scope == "user":
+            can = "can move money" if impact == "money" else "can send messages or change data"
             findings.append(_finding(
-                "ML006", "low", f"Powerful tool '{asset.name}' is available in every project", asset,
-                "A tool that can move money, send messages or change data is within reach of every agent session.",
-                "Limit it to the projects that need it, or allow only its read-only tools.",
-                "ASI03", str(asset.details.get("url") or asset.details.get("command") or ""),
-                group="{n} powerful tools are available in every project",
+                "ML006", _IMPACT_SEVERITY[impact], f"'{asset.name}' {can} and is available in every project", asset,
+                f"Every agent session can use it. {_IMPACT_WHY[impact]}",
+                _narrow_fix(asset, "user"), "ASI03",
+                str(asset.details.get("url") or asset.details.get("command") or ""),
+                group="{n} tools that " + can + " are available in every project",
             ))
     return findings
 
@@ -391,9 +431,7 @@ def _host(url: str) -> str:
 
 def check_plain_http(result: ScanResult, ctx: ScanContext) -> list[Finding]:
     findings = []
-    for asset in result.assets:
-        if asset.kind not in ("mcp_server", "hook"):
-            continue
+    for asset in [*_active_servers(result), *_of_kind(result, "hook")]:
         url = str(asset.details.get("url") or "")
         if not url.lower().startswith("http://") or _host(url) in _LOCAL_HOSTS:
             continue
@@ -448,7 +486,7 @@ def _credential_names(asset: Asset) -> set[str]:
 
 def check_shared_credentials(result: ScanResult, ctx: ScanContext) -> list[Finding]:
     users: dict[str, list[Asset]] = {}
-    for asset in _of_kind(result, "mcp_server"):
+    for asset in _active_servers(result):
         for name in _credential_names(asset):
             users.setdefault(name, []).append(asset)
     findings = []

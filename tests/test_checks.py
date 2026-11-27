@@ -204,7 +204,7 @@ def test_literal_secret_in_env_and_header_is_high(empty_env):
     [finding] = _findings(empty_env, "ML004")
     assert finding.asset == "linear"
     assert finding.severity == "high"
-    assert finding.evidence == "names: Authorization"
+    assert finding.evidence == "names: Authorization (ends in ...1234)"
     assert FAKE_SECRETS[0] not in finding.to_dict().__repr__()
 
 
@@ -231,7 +231,24 @@ def test_harmless_url_query_is_not_a_secret(empty_env):
 def test_literal_secret_in_claude_settings_env(empty_env):
     _write(empty_env.home / ".claude" / "settings.json", {"env": {"ANTHROPIC_AUTH_TOKEN": FAKE_SECRETS[0], "MAX_THINKING_TOKENS": "8000"}, "sandbox": {"enabled": True}})
     [finding] = _findings(empty_env, "ML004")
-    assert finding.evidence == "names: ANTHROPIC_AUTH_TOKEN"
+    assert finding.evidence == "names: ANTHROPIC_AUTH_TOKEN (ends in ...1234)"
+
+
+def test_short_secrets_never_show_an_ending(empty_env):
+    _write(empty_env.home / ".claude" / "settings.json", {"env": {"DB_PASSWORD": "hunter2-FAKE"}, "sandbox": {"enabled": True}})
+    [finding] = _findings(empty_env, "ML004")
+    assert finding.evidence == "names: DB_PASSWORD"
+
+
+def test_secret_endings_stay_out_of_the_inventory(empty_env):
+    _write(empty_env.home / ".claude" / "settings.json", {"env": {"OPENAI_API_KEY": FAKE_SECRETS[0]}, "sandbox": {"enabled": True}})
+    result = run_all(empty_env)
+    [settings] = [a for a in result.assets if a.kind == "settings_file"]
+    assert settings.secret_endings == {"OPENAI_API_KEY": "1234"}
+    assert "secret_endings" not in settings.to_dict()
+    assert "1234" not in repr(settings)
+    payload = json.loads(to_json(result, empty_env, findings=[]))
+    assert "1234" not in json.dumps(payload["assets"])
 
 
 def test_secret_in_command_line(empty_env):
@@ -258,7 +275,7 @@ def test_trading_server_registered_for_home_folder_is_high(empty_env):
     assert str(empty_env.home) not in finding.evidence
 
 
-def test_ordinary_server_for_home_folder_is_medium_and_for_a_project_is_fine(empty_env):
+def test_ordinary_server_for_home_folder_is_low_and_for_a_project_is_fine(empty_env):
     _safe_claude_settings(empty_env)
     _write(
         empty_env.home / ".claude.json",
@@ -270,13 +287,52 @@ def test_ordinary_server_for_home_folder_is_medium_and_for_a_project_is_fine(emp
         },
     )
     [finding] = _findings(empty_env, "ML006")
-    assert (finding.asset, finding.severity) == ("notes", "medium")
+    assert (finding.asset, finding.severity) == ("notes", "low")
+    assert "by accident" in finding.why
 
 
-def test_high_impact_user_server_is_low(empty_env):
+def test_money_tool_is_high_however_it_is_reachable_everywhere(empty_env):
+    """Same tool, same reach, same severity: home-folder entry in Claude Code, global install in Codex."""
+    _safe_claude_settings(empty_env)
+    url = "https://agent.robinhood.com/mcp/trading"
+    _write(empty_env.home / ".claude.json", {"projects": {str(empty_env.home): {"mcpServers": {"robinhood-trading": {"type": "http", "url": url}}}}})
+    _write(empty_env.home / ".codex" / "config.toml", f'[mcp_servers.robinhood-trading]\nurl = "{url}"\n')
+    findings = _findings(empty_env, "ML006")
+    assert {(f.platform, f.severity) for f in findings} == {("claude_code", "high"), ("codex", "high")}
+    [claude] = [f for f in findings if f.platform == "claude_code"]
+    assert claude.fix.startswith("Run: cd ~ && claude mcp remove robinhood-trading --scope local.")
+
+
+def test_messaging_tool_for_every_project_is_medium(empty_env):
     _write(empty_env.home / ".codex" / "config.toml", '[mcp_servers.gmail]\nurl = "https://gmail.example.com/mcp"\n')
     [finding] = _findings(empty_env, "ML006")
-    assert finding.severity == "low"
+    assert finding.severity == "medium"
+    assert finding.title == "'gmail' can send messages or change data and is available in every project"
+    assert "enabled_tools" in finding.fix
+
+
+def test_fix_gives_an_exact_command_only_for_safe_names(empty_env):
+    _safe_claude_settings(empty_env)
+    _write(
+        empty_env.home / ".claude.json",
+        {"mcpServers": {
+            "stripe": {"type": "http", "url": "https://mcp.stripe.com"},
+            "stripe2; rm -rf ~": {"type": "http", "url": "https://pay.example.com/mcp"},
+        }},
+    )
+    fixes = {f.asset: f.fix for f in _findings(empty_env, "ML006")}
+    assert fixes["stripe"].startswith("Run: claude mcp remove stripe --scope user.")
+    assert "rm -rf" not in fixes["stripe2; rm -rf ~"]
+
+
+def test_disabled_servers_are_not_live_risks(empty_env):
+    _safe_claude_settings(empty_env)
+    _write(
+        empty_env.home / ".codex" / "config.toml",
+        '[mcp_servers.pw]\ncommand = "npx"\nargs = ["@playwright/mcp@latest"]\nenabled = false\n'
+        '[mcp_servers.bank]\nurl = "http://bank.example.com/mcp"\nenabled = false\n',
+    )
+    assert _findings(empty_env) == []
 
 
 # ML007 project hooks ------------------------------------------------------------

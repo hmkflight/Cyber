@@ -182,6 +182,28 @@ def literal_secret_names(mapping: Any) -> list[str]:
     return sorted(found)
 
 
+# Only keys at least this long show their last 4 characters; for anything
+# shorter, 4 characters would give away too much of the secret.
+MIN_LENGTH_FOR_ENDING = 20
+
+
+def secret_endings(*mappings: Any) -> dict[str, str]:
+    """Last 4 characters of each long secret typed into the file, by name.
+
+    Used only in the "secret typed into a file" finding, so a person can tell
+    which key to rotate. Never part of the inventory output.
+    """
+    endings: dict[str, str] = {}
+    for mapping in mappings:
+        if not isinstance(mapping, dict):
+            continue
+        for name in literal_secret_names(mapping):
+            value = str(mapping[name]).strip()
+            if len(value) >= MIN_LENGTH_FOR_ENDING:
+                endings[name] = value[-4:]
+    return endings
+
+
 _PLAIN_WORDS = {"true", "false", "yes", "no", "on", "off", "none", "null", "oauth", "basic", "bearer"}
 
 

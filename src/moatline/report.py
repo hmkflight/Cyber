@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -200,21 +201,70 @@ def _describe_settings(d: dict[str, Any]) -> str:
     return "; ".join(bits)
 
 
+@dataclass
+class FindingGroup:
+    """One finding, or several of the same kind shown together."""
+
+    items: list[Finding]
+
+    @property
+    def first(self) -> Finding:
+        return self.items[0]
+
+    @property
+    def title(self) -> str:
+        if len(self.items) == 1:
+            return self.first.title
+        return self.first.group_title.replace("{n}", str(len(self.items)))
+
+
+def group_findings(findings: list[Finding]) -> list[FindingGroup]:
+    """Combine findings with the same check, severity and advice, keeping the order."""
+    groups: list[FindingGroup] = []
+    by_key: dict[tuple[str, ...], FindingGroup] = {}
+    for finding in findings:
+        if not finding.group_title:
+            groups.append(FindingGroup([finding]))
+            continue
+        key = (finding.check_id, finding.severity, finding.why, finding.fix, finding.group_title)
+        if key in by_key:
+            by_key[key].items.append(finding)
+        else:
+            by_key[key] = FindingGroup([finding])
+            groups.append(by_key[key])
+    return groups
+
+
+def clean_findings(findings: list[Finding], ctx: ScanContext) -> list[Finding]:
+    """Findings with the home folder shown as ~ in every field."""
+    return [Finding(**_clean(f.to_dict(), ctx.home)) for f in findings]
+
+
+def where(finding: Finding) -> str:
+    """'Claude Code, 'github' in ~/.claude.json' (expects a cleaned finding)."""
+    tool = PLATFORM_TITLES.get(finding.platform, finding.platform)
+    item = "" if finding.asset == Path(finding.source).name else f"'{finding.asset}' in "
+    return f"{tool}, {item}{finding.source}"
+
+
 def _findings_lines(findings: list[Finding], ctx: ScanContext) -> list[str]:
     counts = counts_by_severity(findings)
     lines = ["", f"Findings: {counts['high']} high, {counts['medium']} medium, {counts['low']} low"]
     if not findings:
         lines.append("  No risky settings found.")
         return lines
-    for finding in findings:
-        f = Finding(**_clean(finding.to_dict(), ctx.home))
+    for group in group_findings(clean_findings(findings, ctx)):
+        f = group.first
         lines.append("")
-        lines.append(f"  [{f.severity.upper()}] {f.title}")
-        tool = PLATFORM_TITLES.get(f.platform, f.platform)
-        item = "" if f.asset == Path(f.source).name else f"'{f.asset}' in "
-        lines.append(f"      Where: {tool}, {item}{f.source}")
-        if f.evidence:
-            lines.append(f"      Found: {f.evidence}")
+        lines.append(f"  [{f.severity.upper()}] {group.title}")
+        if len(group.items) == 1:
+            lines.append(f"      Where: {where(f)}")
+            if f.evidence:
+                lines.append(f"      Found: {f.evidence}")
+        else:
+            lines.append("      Where:")
+            for item in group.items:
+                lines.append(f"        - {where(item)}" + (f": {item.evidence}" if item.evidence else ""))
         lines.append(f"      Why it matters: {f.why}")
         lines.append(f"      How to fix: {f.fix}")
         lines.append(f"      OWASP: {f.owasp} ({f.check_id})")
